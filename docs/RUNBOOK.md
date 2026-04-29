@@ -41,7 +41,17 @@ GET http://127.0.0.1:8000/api/account/equity
 
 ## 4. 启动前端
 
-需要先安装 Node.js 和 npm。
+需要先安装 Node.js 和 npm。本机已使用官方 Node.js LTS zip 配置过：
+
+```text
+C:\Users\37478\.local\nodejs\node-v24.15.0-win-x64
+```
+
+如果新开的 PowerShell 仍然不能识别 `npm`，可以临时执行：
+
+```powershell
+$env:Path = "C:\Users\37478\.local\nodejs\node-v24.15.0-win-x64;$env:Path"
+```
 
 ```powershell
 cd frontend
@@ -60,4 +70,4 @@ http://127.0.0.1:5173
 - 现在的行情源是确定性样例数据，用于验证项目结构和闭环。
 - 还没有接入 AkShare 实时/历史接口。
 - 前端只读展示，不提供真实账户登录或下单能力。
-- 本地机器当前没有可用 `npm`，所以前端构建需要等 Node.js/npm 配好后再验证。
+- 前端生产构建已通过 `npm run build` 验证。
