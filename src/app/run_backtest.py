@@ -1,0 +1,98 @@
+"""Run a local ETF simulation backtest."""
+
+from __future__ import annotations
+
+import argparse
+from datetime import datetime
+
+from src.config import load_config
+from src.data.sample_data import generate_sample_bars
+from src.reporting.csv_report import write_reports
+from src.storage.parquet_store import ParquetMarketStore
+from src.storage.sqlite_store import SQLiteStore
+from src.strategy.grid_t import GridTBacktester
+from src.universe.filter import select_universe
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Run ETF T+0 local simulation.")
+    parser.add_argument("--config", default="config/config.example.yaml", help="Path to YAML config.")
+    parser.add_argument("--sample", action="store_true", help="Use deterministic sample ETF bars.")
+    parser.add_argument("--periods", type=int, default=120, help="Business-day sample length.")
+    args = parser.parse_args()
+
+    cfg = load_config(args.config)
+    state_store = SQLiteStore(cfg.state_db)
+    state_store.initialize()
+
+    market_store = ParquetMarketStore(cfg.parquet_dir)
+    if args.sample:
+        sample_bars = generate_sample_bars(start=cfg.raw["data"]["start_date"], periods=args.periods)
+        market_store.write_bars(sample_bars, interval=cfg.raw["data"]["bar_interval"])
+
+    bars = market_store.read_bars(
+        interval=cfg.raw["data"]["bar_interval"],
+        start_date=cfg.raw["data"]["start_date"],
+        end_date=cfg.raw["data"]["end_date"],
+    )
+    universe = select_universe(bars, cfg.raw["universe"])
+    if universe.empty:
+        raise RuntimeError("No ETF candidates selected. Check data or universe thresholds.")
+
+    started_at = datetime.now().isoformat(timespec="seconds")
+    run_id = state_store.create_run(
+        started_at=started_at,
+        strategy_name=cfg.raw["strategy"]["name"],
+        initial_cash=cfg.initial_cash,
+        notes="sample data" if args.sample else "local parquet data",
+    )
+
+    backtester = GridTBacktester(cfg.raw, cfg.initial_cash)
+    account = backtester.run(run_id=run_id, bars=bars, universe=universe)
+
+    as_of_date = str(bars["datetime"].max())[:10]
+    universe_rows = [
+        {
+            "run_id": run_id,
+            "date": as_of_date,
+            "symbol": row.symbol,
+            "name": row.name,
+            "avg_amount_20d": round(float(row.avg_amount_20d), 2),
+            "volatility_20d": round(float(row.volatility_20d), 6),
+            "rank": int(row.rank),
+        }
+        for row in universe.itertuples(index=False)
+    ]
+    position_rows = account.position_rows(run_id)
+
+    state_store.replace_run_outputs(
+        run_id=run_id,
+        signals=account.signals,
+        trades=account.trades,
+        positions=position_rows,
+        snapshots=account.snapshots,
+        universe=universe_rows,
+    )
+    files = write_reports(
+        cfg.reporting_dir,
+        signals=account.signals,
+        trades=account.trades,
+        positions=position_rows,
+        snapshots=account.snapshots,
+        universe=universe_rows,
+    )
+
+    final_snapshot = account.snapshots[-1]
+    print(f"run_id: {run_id}")
+    print(f"bars: {len(bars)}")
+    print(f"universe: {len(universe)}")
+    print(f"signals: {len(account.signals)}")
+    print(f"trades: {len(account.trades)}")
+    print(f"final_equity: {final_snapshot['total_equity']}")
+    print(f"total_return: {final_snapshot['total_return']}")
+    for name, path in files.items():
+        print(f"{name}: {path}")
+
+
+if __name__ == "__main__":
+    main()

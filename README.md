@@ -58,6 +58,7 @@ ETF/
   docs/
     ARCHITECTURE.md
     ROADMAP.md
+    RUNBOOK.md
     STRATEGY_SPEC.md
     TECH_STACK.md
   src/
@@ -130,3 +131,7 @@ ETF/
 4. 把行情写入 Parquet，把交易状态写入 SQLite。
 5. 输出交易日志和收益统计。
 6. 用 FastAPI + React 做一个本地 K 线看板。
+
+## 运行方式
+
+详见 [RUNBOOK.md](docs/RUNBOOK.md)。
