@@ -1,0 +1,75 @@
+﻿capital:
+  initial_cash: 100000
+  currency: CNY
+
+data:
+  provider: akshare
+  cache_dir: data/cache
+  parquet_dir: data/parquet
+  bar_interval: 1d
+  start_date: "2024-01-01"
+  end_date: "2026-04-29"
+
+storage:
+  market_store: parquet
+  query_engine: duckdb
+  state_db: data/local.db
+  use_mongodb: false
+  mongodb_uri: ""
+  mongodb_database: etf_sim
+
+universe:
+  market: cn_etf
+  max_candidates: 10
+  min_price: 0.5
+  min_avg_amount_20d: 50000000
+  min_volatility_20d: 0.008
+  max_volatility_20d: 0.04
+  exclude_money_fund_etf: true
+
+strategy:
+  name: grid_t
+  grid_pct: 0.006
+  take_profit_pct: 0.006
+  max_grid_levels: 5
+  base_position_pct: 0.5
+  trade_amount: 8000
+  allow_buy: true
+  allow_sell: true
+
+broker_sim:
+  lot_size: 100
+  fee_rate: 0.0001
+  min_fee: 0
+  slippage_pct: 0.0002
+  fill_mode: next_bar_open
+
+risk:
+  max_total_position_pct: 0.7
+  max_symbol_position_pct: 0.2
+  min_cash_pct: 0.1
+  max_trades_per_symbol_per_day: 4
+  max_trades_per_day: 20
+  max_daily_loss_pct: 0.02
+  pause_after_consecutive_losses: 3
+  protect_base_position: true
+
+reporting:
+  output_dir: reports
+  write_trades_csv: true
+  write_daily_summary_csv: true
+  write_signals_csv: true
+  generate_html: false
+
+api:
+  host: "127.0.0.1"
+  port: 8000
+  cors_origins:
+    - "http://127.0.0.1:5173"
+    - "http://localhost:5173"
+
+frontend:
+  dev_server: "http://127.0.0.1:5173"
+  kline_library: tradingview_lightweight_charts
+  stats_library: echarts
+  default_symbol: "510300"

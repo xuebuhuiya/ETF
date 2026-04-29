@@ -1,0 +1,14 @@
+data/cache/
+data/parquet/
+data/*.db
+data/*.sqlite
+reports/*.csv
+reports/*.html
+*.db
+*.sqlite
+*.log
+__pycache__/
+.venv/
+.env
+frontend/node_modules/
+frontend/dist/

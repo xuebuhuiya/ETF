@@ -1,0 +1,144 @@
+﻿# Strategy Spec
+
+## 策略目标
+
+做T策略不是预测长期方向，而是在已有或虚拟底仓基础上，利用 ETF 日内/短期波动降低持仓成本或验证规则有效性。
+
+第一版只验证规则，不追求最复杂。
+
+## ETF 筛选规则
+
+默认筛选流程：
+
+1. 获取全市场 ETF 实时行情。
+2. 按成交额排序，保留前 100。
+3. 过滤价格小于 0.5 的 ETF。
+4. 计算近 20 日波动率。
+5. 保留波动率适中的 ETF。
+6. 每天最多选择 5 到 10 只进入模拟池。
+
+默认参数：
+
+```yaml
+universe:
+  max_candidates: 10
+  min_price: 0.5
+  min_avg_amount_20d: 50000000
+  min_volatility_20d: 0.008
+  max_volatility_20d: 0.04
+```
+
+## 网格做T规则
+
+适合震荡 ETF。
+
+核心逻辑：
+
+- 以参考价为中心建立网格。
+- 每跌一格买入一份 T 仓。
+- 每涨一格卖出一份 T 仓。
+- 保留底仓，不卖穿。
+
+示例：
+
+```yaml
+strategy:
+  name: grid_t
+  grid_pct: 0.006
+  take_profit_pct: 0.006
+  max_grid_levels: 5
+  base_position_pct: 0.5
+  trade_amount: 8000
+```
+
+买入触发：
+
+```text
+当前价 <= 最近参考价 * (1 - grid_pct)
+现金充足
+当前ETF仓位未超过单只上限
+当天买入次数未超过限制
+```
+
+卖出触发：
+
+```text
+当前价 >= 最近买入价 * (1 + take_profit_pct)
+可卖份额充足
+卖出后仍保留底仓
+当天卖出次数未超过限制
+```
+
+## 均值回归做T规则
+
+适合波动但未明显单边趋势的 ETF。
+
+指标：
+
+- MA20。
+- 偏离率：`close / ma20 - 1`。
+
+买入触发：
+
+```text
+偏离率 <= -1.2%
+近20日波动率在允许范围内
+现金充足
+```
+
+卖出触发：
+
+```text
+偏离率 >= 0.8%
+可卖份额充足
+不低于底仓
+```
+
+## 风控规则
+
+```yaml
+risk:
+  max_total_position_pct: 0.7
+  max_symbol_position_pct: 0.2
+  min_cash_pct: 0.1
+  max_trades_per_symbol_per_day: 4
+  max_trades_per_day: 20
+  max_daily_loss_pct: 0.02
+  pause_after_consecutive_losses: 3
+```
+
+## 交易成本
+
+第一版使用简化模型：
+
+```text
+成交价 = 信号价 * (1 + 滑点方向)
+手续费 = 成交金额 * fee_rate
+买入占用现金 = 成交金额 + 手续费
+卖出增加现金 = 成交金额 - 手续费
+```
+
+注意：
+
+- A 股 ETF 通常无印花税，但不同券商佣金不同。
+- 第一版手续费可配置，不默认代表真实券商费率。
+
+## 日志字段
+
+`signals.csv`：
+
+```text
+datetime,symbol,name,side,price,quantity,strategy,reason,status,reject_reason
+```
+
+`trades.csv`：
+
+```text
+datetime,symbol,name,side,price,quantity,amount,fee,slippage,pnl,reason
+```
+
+`daily_summary.csv`：
+
+```text
+date,cash,market_value,total_equity,daily_pnl,total_return,max_drawdown,trade_count
+```
