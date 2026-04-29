@@ -74,6 +74,40 @@ header h2 {
   font-size: 28px;
 }
 
+.playback {
+  display: grid;
+  grid-template-columns: auto auto minmax(160px, 1fr) auto auto auto;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.playback button {
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.playback button:disabled {
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
+.playback input {
+  width: 100%;
+}
+
+.playback span {
+  color: #64748b;
+  font-size: 13px;
+}
+
 .chart {
   width: 100%;
   min-height: 420px;
@@ -100,6 +134,31 @@ section {
 h3 {
   margin: 20px 0 10px;
   font-size: 16px;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.metrics div {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.metrics span {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.metrics strong {
+  font-size: 18px;
 }
 
 table {
@@ -143,5 +202,19 @@ td.sell {
 
   .grid {
     grid-template-columns: 1fr;
+  }
+
+  .playback {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .playback input,
+  .playback strong,
+  .playback span {
+    grid-column: 1 / -1;
+  }
+
+  .metrics {
+    grid-template-columns: 1fr 1fr;
   }
 }
