@@ -143,6 +143,10 @@ h3 {
   margin-bottom: 12px;
 }
 
+.metrics.account {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
 .metrics div {
   border: 1px solid #e5e7eb;
   border-radius: 6px;
@@ -168,6 +172,15 @@ table {
   border: 1px solid #e5e7eb;
   border-radius: 6px;
   background: #ffffff;
+}
+
+th {
+  border-bottom: 1px solid #e5e7eb;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 10px 12px;
+  text-align: left;
 }
 
 td {
@@ -215,6 +228,10 @@ td.sell {
   }
 
   .metrics {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .metrics.account {
     grid-template-columns: 1fr 1fr;
   }
 }

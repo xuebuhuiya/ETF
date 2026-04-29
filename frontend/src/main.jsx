@@ -115,10 +115,10 @@ function PlaybackControls({ dates, index, playing, onIndexChange, onPlayingChang
   return (
     <div className="playback">
       <button onClick={() => onPlayingChange(!playing)} disabled={dates.length === 0}>
-        {playing ? 'Pause' : 'Play'}
+        {playing ? '暂停' : '播放'}
       </button>
       <button onClick={() => onIndexChange(Math.max(0, index - 1))} disabled={index <= 0}>
-        Prev
+        上一天
       </button>
       <input
         type="range"
@@ -131,11 +131,48 @@ function PlaybackControls({ dates, index, playing, onIndexChange, onPlayingChang
         onClick={() => onIndexChange(Math.min(dates.length - 1, index + 1))}
         disabled={index >= dates.length - 1}
       >
-        Next
+        下一天
       </button>
       <strong>{currentDate}</strong>
       <span>{dates.length ? `${index + 1}/${dates.length}` : '0/0'}</span>
     </div>
+  );
+}
+
+function AccountOverview({ currentSnapshot }) {
+  const totalReturn = currentSnapshot ? `${(currentSnapshot.total_return * 100).toFixed(2)}%` : '-';
+  const maxDrawdown = currentSnapshot ? `${(currentSnapshot.max_drawdown * 100).toFixed(2)}%` : '-';
+
+  return (
+    <section>
+      <h3>账户总览</h3>
+      <div className="metrics account">
+        <div>
+          <span>现金</span>
+          <strong>{currentSnapshot ? currentSnapshot.cash.toFixed(2) : '-'}</strong>
+        </div>
+        <div>
+          <span>持仓市值</span>
+          <strong>{currentSnapshot ? currentSnapshot.market_value.toFixed(2) : '-'}</strong>
+        </div>
+        <div>
+          <span>总资产</span>
+          <strong>{currentSnapshot ? currentSnapshot.total_equity.toFixed(2) : '-'}</strong>
+        </div>
+        <div>
+          <span>累计收益率</span>
+          <strong>{totalReturn}</strong>
+        </div>
+        <div>
+          <span>最大回撤</span>
+          <strong>{maxDrawdown}</strong>
+        </div>
+        <div>
+          <span>成交次数</span>
+          <strong>{currentSnapshot ? currentSnapshot.trade_count : '-'}</strong>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -147,48 +184,67 @@ function StrategyCheck({ currentBar, currentSnapshot, visibleTrades, visibleSign
 
   return (
     <section>
-      <h3>Strategy Check</h3>
+      <h3>策略检查</h3>
       <div className="metrics">
         <div>
-          <span>Close</span>
+          <span>当前收盘价</span>
           <strong>{currentBar ? currentBar.close.toFixed(4) : '-'}</strong>
         </div>
         <div>
-          <span>Equity</span>
+          <span>当前总资产</span>
           <strong>{currentSnapshot ? currentSnapshot.total_equity.toFixed(2) : '-'}</strong>
         </div>
         <div>
-          <span>Signals</span>
+          <span>已成交信号/总信号</span>
           <strong>{filledSignals}/{visibleSignals.length}</strong>
         </div>
         <div>
-          <span>Rejected</span>
+          <span>风控拦截</span>
           <strong>{rejectedSignals}</strong>
         </div>
       </div>
       <table>
+        <thead>
+          <tr>
+            <th>日期</th>
+            <th>方向</th>
+            <th>份额</th>
+            <th>状态</th>
+            <th>原因</th>
+          </tr>
+        </thead>
         <tbody>
           {lastSignals.map((row, index) => (
             <tr key={`${row.datetime}-${row.side}-${index}`}>
               <td>{row.datetime}</td>
-              <td className={row.side}>{row.side}</td>
+              <td className={row.side}>{row.side === 'buy' ? '买入' : '卖出'}</td>
               <td>{row.quantity}</td>
-              <td>{row.status}</td>
+              <td>{row.status === 'filled' ? '已成交' : '已拦截'}</td>
               <td>{row.reject_reason || row.reason}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      <h3>Visible Trades</h3>
+      <h3>当前可见成交</h3>
       <table>
+        <thead>
+          <tr>
+            <th>日期</th>
+            <th>名称</th>
+            <th>方向</th>
+            <th>份额</th>
+            <th>价格</th>
+            <th>原因</th>
+          </tr>
+        </thead>
         <tbody>
           {lastTrades.map((row, index) => (
             <tr key={`${row.datetime}-${row.symbol}-${index}`}>
-              <td>{row.datetime}</td>
-              <td>{row.name}</td>
-              <td className={row.side}>{row.side}</td>
-              <td>{row.quantity}</td>
-              <td>{row.price.toFixed(4)}</td>
+                  <td>{row.datetime}</td>
+                  <td>{row.name}</td>
+                  <td className={row.side}>{row.side === 'buy' ? '买入' : '卖出'}</td>
+                  <td>{row.quantity}</td>
+                  <td>{row.price.toFixed(4)}</td>
               <td>{row.reason}</td>
             </tr>
           ))}
@@ -278,7 +334,7 @@ function App() {
   return (
     <main className="shell">
       <aside className="sidebar">
-        <h1>ETF Sim</h1>
+        <h1>ETF 模拟盘</h1>
         <div className="list">
           {universe.map((item) => (
             <button
@@ -295,7 +351,7 @@ function App() {
       <section className="content">
         <header>
           <div>
-            <p>Local Simulation Replay</p>
+            <p>本地模拟回放</p>
             <h2>{selectedName}</h2>
           </div>
         </header>
@@ -310,14 +366,22 @@ function App() {
           onPlayingChange={setPlaying}
         />
         <KlineChart bars={visibleBars} trades={visibleTrades} />
+        <AccountOverview currentSnapshot={currentSnapshot} />
         <div className="grid">
           <section>
-            <h3>Account Equity Replay</h3>
+            <h3>账户总资产回放</h3>
             <EquityChart rows={visibleEquity} />
           </section>
           <section>
-            <h3>Positions</h3>
+            <h3>当前持仓浮盈亏</h3>
             <table>
+              <thead>
+                <tr>
+                  <th>名称</th>
+                  <th>持仓份额</th>
+                  <th>浮动盈亏</th>
+                </tr>
+              </thead>
               <tbody>
                 {positions.map((row) => (
                   <tr key={row.symbol}>
