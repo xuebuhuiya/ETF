@@ -5,6 +5,11 @@ import * as echarts from 'echarts';
 import './styles.css';
 
 const API_BASE = 'http://127.0.0.1:8000';
+const STATUS_LABELS = {
+  filled: '已成交',
+  rejected: '已拦截',
+  pending: '待成交',
+};
 
 async function fetchJson(path) {
   const response = await fetch(`${API_BASE}${path}`);
@@ -179,6 +184,7 @@ function AccountOverview({ currentSnapshot }) {
 function StrategyCheck({ currentBar, currentSnapshot, visibleTrades, visibleSignals }) {
   const filledSignals = visibleSignals.filter((signal) => signal.status === 'filled').length;
   const rejectedSignals = visibleSignals.filter((signal) => signal.status === 'rejected').length;
+  const pendingSignals = visibleSignals.filter((signal) => signal.status === 'pending').length;
   const lastTrades = visibleTrades.slice(-8).reverse();
   const lastSignals = visibleSignals.slice(-8).reverse();
 
@@ -202,6 +208,10 @@ function StrategyCheck({ currentBar, currentSnapshot, visibleTrades, visibleSign
           <span>风控拦截</span>
           <strong>{rejectedSignals}</strong>
         </div>
+        <div>
+          <span>待次日成交</span>
+          <strong>{pendingSignals}</strong>
+        </div>
       </div>
       <table>
         <thead>
@@ -219,7 +229,7 @@ function StrategyCheck({ currentBar, currentSnapshot, visibleTrades, visibleSign
               <td>{row.datetime}</td>
               <td className={row.side}>{row.side === 'buy' ? '买入' : '卖出'}</td>
               <td>{row.quantity}</td>
-              <td>{row.status === 'filled' ? '已成交' : '已拦截'}</td>
+              <td>{STATUS_LABELS[row.status] ?? row.status}</td>
               <td>{row.reject_reason || row.reason}</td>
             </tr>
           ))}

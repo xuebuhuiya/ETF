@@ -18,6 +18,7 @@ class GridTBacktester:
         self.risk_config = config["risk"]
         self.account = SimAccount(initial_cash, config["broker_sim"], config["risk"])
         self.reference_prices: dict[str, float] = {}
+        self.pending_by_symbol: dict[str, dict] = {}
 
     def run(self, run_id: int, bars: pd.DataFrame, universe: pd.DataFrame) -> SimAccount:
         selected_symbols = set(universe["symbol"].tolist())
@@ -27,18 +28,28 @@ class GridTBacktester:
             dt_string = str(dt)[:10]
 
             for row in day_bars.itertuples(index=False):
-                price = float(row.close)
-                self.account.update_price(row.symbol, row.name, price)
-                self._maybe_initialize_base(run_id, dt_string, row.symbol, row.name, price)
-                self._maybe_trade_grid(run_id, dt_string, row.symbol, row.name, price)
+                open_price = float(row.open)
+                close_price = float(row.close)
+                self._execute_pending_at_open(dt_string, row.symbol, open_price)
+                self.account.update_price(row.symbol, row.name, close_price)
+                self._maybe_initialize_base(run_id, dt_string, row.symbol, row.name, close_price)
+                self._maybe_trade_grid(run_id, dt_string, row.symbol, row.name, close_price)
 
             self.account.record_snapshot(run_id, dt_string)
 
         return self.account
 
+    def _execute_pending_at_open(self, dt: str, symbol: str, open_price: float) -> None:
+        pending = self.pending_by_symbol.pop(symbol, None)
+        if pending is None:
+            return
+        self.account.execute_pending_signal(pending, execution_dt=dt, execution_price=open_price)
+
     def _maybe_initialize_base(self, run_id: int, dt: str, symbol: str, name: str, price: float) -> None:
         position = self.account.positions.get(symbol)
         if position and position.base_quantity > 0:
+            return
+        if symbol in self.pending_by_symbol:
             return
 
         base_budget = (
@@ -48,7 +59,7 @@ class GridTBacktester:
         )
         quantity = self.account.quantity_for_amount(base_budget, price)
         self.reference_prices[symbol] = price
-        self.account.execute_signal(
+        self._submit_signal(
             run_id=run_id,
             dt=dt,
             symbol=symbol,
@@ -65,6 +76,8 @@ class GridTBacktester:
         position = self.account.positions.get(symbol)
         if position is None or position.quantity <= 0:
             return
+        if symbol in self.pending_by_symbol:
+            return
 
         reference = self.reference_prices.get(symbol, price)
         grid_pct = float(self.strategy_config["grid_pct"])
@@ -73,7 +86,7 @@ class GridTBacktester:
         quantity = self.account.quantity_for_amount(trade_amount, price)
 
         if self.strategy_config.get("allow_buy", True) and price <= reference * (1 - grid_pct):
-            self.account.execute_signal(
+            self._submit_signal(
                 run_id=run_id,
                 dt=dt,
                 symbol=symbol,
@@ -93,7 +106,7 @@ class GridTBacktester:
             and sellable_t > 0
             and price >= position.avg_cost * (1 + take_profit_pct)
         ):
-            self.account.execute_signal(
+            self._submit_signal(
                 run_id=run_id,
                 dt=dt,
                 symbol=symbol,
@@ -105,3 +118,11 @@ class GridTBacktester:
                 reason=f"grid_sell price >= avg_cost*(1+{take_profit_pct})",
             )
             self.reference_prices[symbol] = price
+
+    def _submit_signal(self, **kwargs) -> None:
+        fill_mode = self.config["broker_sim"].get("fill_mode", "next_bar_open")
+        if fill_mode == "next_bar_open":
+            pending = self.account.submit_signal(**kwargs)
+            self.pending_by_symbol[pending["symbol"]] = pending
+            return
+        self.account.execute_signal(**kwargs)

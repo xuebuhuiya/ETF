@@ -79,25 +79,80 @@ class SimAccount:
         reason: str,
         base_quantity: int | None = None,
     ) -> None:
+        pending = self.submit_signal(
+            run_id=run_id,
+            dt=dt,
+            symbol=symbol,
+            name=name,
+            side=side,
+            price=price,
+            quantity=quantity,
+            strategy=strategy,
+            reason=reason,
+            base_quantity=base_quantity,
+        )
+        self.execute_pending_signal(pending, execution_dt=dt, execution_price=price)
+
+    def submit_signal(
+        self,
+        *,
+        run_id: int,
+        dt: str,
+        symbol: str,
+        name: str,
+        side: str,
+        price: float,
+        quantity: int,
+        strategy: str,
+        reason: str,
+        base_quantity: int | None = None,
+    ) -> dict:
+        """Record a signal without filling it yet."""
+
         quantity = self.round_lot(quantity)
-        reject_reason = self._risk_reject_reason(dt, symbol, side, price, quantity)
+        signal = {
+            "run_id": run_id,
+            "datetime": dt,
+            "symbol": symbol,
+            "name": name,
+            "side": side,
+            "price": price,
+            "quantity": quantity,
+            "strategy": strategy,
+            "reason": reason,
+            "status": "pending",
+            "reject_reason": None,
+        }
+        self.signals.append(signal)
+        return {
+            "signal_index": len(self.signals) - 1,
+            "run_id": run_id,
+            "signal_dt": dt,
+            "symbol": symbol,
+            "name": name,
+            "side": side,
+            "signal_price": price,
+            "quantity": quantity,
+            "strategy": strategy,
+            "reason": reason,
+            "base_quantity": base_quantity,
+        }
+
+    def execute_pending_signal(self, pending: dict, execution_dt: str, execution_price: float) -> None:
+        """Fill or reject a previously generated signal at the execution price."""
+
+        symbol = pending["symbol"]
+        name = pending["name"]
+        side = pending["side"]
+        quantity = self.round_lot(int(pending["quantity"]))
+        price = float(execution_price)
+
+        reject_reason = self._risk_reject_reason(execution_dt, symbol, side, price, quantity)
         status = "rejected" if reject_reason else "filled"
 
-        self.signals.append(
-            {
-                "run_id": run_id,
-                "datetime": dt,
-                "symbol": symbol,
-                "name": name,
-                "side": side,
-                "price": price,
-                "quantity": quantity,
-                "strategy": strategy,
-                "reason": reason,
-                "status": status,
-                "reject_reason": reject_reason,
-            }
-        )
+        signal = self.signals[int(pending["signal_index"])]
+        signal["status"] = status
+        signal["reject_reason"] = reject_reason
 
         if reject_reason:
             return
@@ -116,22 +171,22 @@ class SimAccount:
             position.quantity += quantity
             position.avg_cost = (old_cost + amount + fee) / position.quantity
             self.cash -= amount + fee
-            if base_quantity is not None:
-                position.base_quantity = max(position.base_quantity, base_quantity)
+            if pending.get("base_quantity") is not None:
+                position.base_quantity = max(position.base_quantity, int(pending["base_quantity"]))
         else:
             position.quantity -= quantity
             self.cash += amount - fee
             if position.quantity == 0:
                 position.avg_cost = 0.0
 
-        self.trade_count_by_day[dt] = self.trade_count_by_day.get(dt, 0) + 1
-        key = (symbol, dt)
+        self.trade_count_by_day[execution_dt] = self.trade_count_by_day.get(execution_dt, 0) + 1
+        key = (symbol, execution_dt)
         self.trade_count_by_symbol_day[key] = self.trade_count_by_symbol_day.get(key, 0) + 1
 
         self.trades.append(
             {
-                "run_id": run_id,
-                "datetime": dt,
+                "run_id": pending["run_id"],
+                "datetime": execution_dt,
                 "symbol": symbol,
                 "name": name,
                 "side": side,
@@ -142,7 +197,7 @@ class SimAccount:
                 "slippage": round(slippage, 2),
                 "cash_after": round(self.cash, 2),
                 "position_after": position.quantity,
-                "reason": reason,
+                "reason": f"{pending['reason']} | signal_date={pending['signal_dt']}",
             }
         )
 
