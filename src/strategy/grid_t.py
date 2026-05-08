@@ -19,12 +19,16 @@ class GridTBacktester:
         self.account = SimAccount(initial_cash, config["broker_sim"], config["risk"])
         self.reference_prices: dict[str, float] = {}
         self.pending_by_symbol: dict[str, dict] = {}
+        self.grid_levels: dict[str, int] = {}
+        self.last_buy_day_index: dict[str, int] = {}
+        self.current_day_index = 0
 
     def run(self, run_id: int, bars: pd.DataFrame, universe: pd.DataFrame) -> SimAccount:
         selected_symbols = set(universe["symbol"].tolist())
         frame = bars[bars["symbol"].isin(selected_symbols)].sort_values(["datetime", "symbol"])
 
-        for dt, day_bars in frame.groupby("datetime", sort=True):
+        for day_index, (dt, day_bars) in enumerate(frame.groupby("datetime", sort=True)):
+            self.current_day_index = day_index
             dt_string = str(dt)[:10]
 
             for row in day_bars.itertuples(index=False):
@@ -44,6 +48,14 @@ class GridTBacktester:
         if pending is None:
             return
         self.account.execute_pending_signal(pending, execution_dt=dt, execution_price=open_price)
+        signal = self.account.signals[int(pending["signal_index"])]
+        if signal["status"] != "filled":
+            return
+        if pending["side"] == "buy" and pending["reason"] != "initialize_base_position":
+            self.grid_levels[symbol] = self.grid_levels.get(symbol, 0) + 1
+            self.last_buy_day_index[symbol] = self.current_day_index
+        elif pending["side"] == "sell":
+            self.grid_levels[symbol] = max(0, self.grid_levels.get(symbol, 0) - 1)
 
     def _maybe_initialize_base(self, run_id: int, dt: str, symbol: str, name: str, price: float) -> None:
         position = self.account.positions.get(symbol)
@@ -97,6 +109,12 @@ class GridTBacktester:
         quantity = self.account.quantity_for_amount(trade_amount, price)
 
         if self.strategy_config.get("allow_buy", True) and price <= reference * (1 - grid_pct):
+            max_grid_levels = int(self.strategy_config.get("max_grid_levels", 0))
+            current_grid_level = self.grid_levels.get(symbol, 0)
+
+            buy_cooldown_days = int(self.strategy_config.get("buy_cooldown_days", 0))
+            days_since_last_buy = self._days_since_last_buy(symbol)
+
             buy_threshold = reference * (1 - grid_pct)
             audit = self._audit_context(symbol, price)
             audit.update(
@@ -108,8 +126,42 @@ class GridTBacktester:
                     "distance_to_reference_pct": round((price / reference) - 1, 6) if reference else None,
                     "trade_amount": trade_amount,
                     "planned_quantity": quantity,
+                    "current_grid_level": current_grid_level,
+                    "max_grid_levels": max_grid_levels,
+                    "buy_cooldown_days": buy_cooldown_days,
+                    "days_since_last_buy": days_since_last_buy,
                 }
             )
+            if max_grid_levels and current_grid_level >= max_grid_levels:
+                self.account.record_rejected_signal(
+                    run_id=run_id,
+                    dt=dt,
+                    symbol=symbol,
+                    name=name,
+                    side="buy",
+                    price=price,
+                    quantity=quantity,
+                    strategy=self.strategy_name,
+                    reason=f"grid_buy price <= reference*(1-{grid_pct})",
+                    reject_reason="max_grid_levels",
+                    audit=audit,
+                )
+                return
+            if buy_cooldown_days and days_since_last_buy is not None and days_since_last_buy < buy_cooldown_days:
+                self.account.record_rejected_signal(
+                    run_id=run_id,
+                    dt=dt,
+                    symbol=symbol,
+                    name=name,
+                    side="buy",
+                    price=price,
+                    quantity=quantity,
+                    strategy=self.strategy_name,
+                    reason=f"grid_buy price <= reference*(1-{grid_pct})",
+                    reject_reason="buy_cooldown_days",
+                    audit=audit,
+                )
+                return
             self._submit_signal(
                 run_id=run_id,
                 dt=dt,
@@ -143,6 +195,8 @@ class GridTBacktester:
                     "sellable_t_quantity": sellable_t,
                     "trade_amount": trade_amount,
                     "planned_quantity": planned_quantity,
+                    "current_grid_level": self.grid_levels.get(symbol, 0),
+                    "max_grid_levels": int(self.strategy_config.get("max_grid_levels", 0)),
                 }
             )
             self._submit_signal(
@@ -167,6 +221,12 @@ class GridTBacktester:
             return
         self.account.execute_signal(**kwargs)
 
+    def _days_since_last_buy(self, symbol: str) -> int | None:
+        last_day = self.last_buy_day_index.get(symbol)
+        if last_day is None:
+            return None
+        return self.current_day_index - last_day
+
     def _audit_context(self, symbol: str, signal_price: float) -> dict:
         position = self.account.positions.get(symbol)
         return {
@@ -182,4 +242,8 @@ class GridTBacktester:
             "max_total_position_pct": float(self.risk_config["max_total_position_pct"]),
             "max_symbol_position_pct": float(self.risk_config["max_symbol_position_pct"]),
             "min_cash_pct": float(self.risk_config["min_cash_pct"]),
+            "current_grid_level": self.grid_levels.get(symbol, 0),
+            "max_grid_levels": int(self.strategy_config.get("max_grid_levels", 0)),
+            "buy_cooldown_days": int(self.strategy_config.get("buy_cooldown_days", 0)),
+            "days_since_last_buy": self._days_since_last_buy(symbol),
         }

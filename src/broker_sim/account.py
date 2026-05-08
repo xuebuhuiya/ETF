@@ -156,6 +156,53 @@ class SimAccount:
             "audit": audit_payload,
         }
 
+    def record_rejected_signal(
+        self,
+        *,
+        run_id: int,
+        dt: str,
+        symbol: str,
+        name: str,
+        side: str,
+        price: float,
+        quantity: int,
+        strategy: str,
+        reason: str,
+        reject_reason: str,
+        audit: dict | None = None,
+    ) -> None:
+        """Record a strategy-level rejection before a signal is sent for execution."""
+
+        quantity = self.round_lot(quantity)
+        signal_id = len(self.signals) + 1
+        audit_payload = dict(audit or {})
+        audit_payload.update(
+            {
+                "signal_id": signal_id,
+                "signal_datetime": dt,
+                "signal_price": round(float(price), 4),
+                "execution_status": "rejected",
+                "reject_reason": reject_reason,
+            }
+        )
+        self.signals.append(
+            {
+                "signal_id": signal_id,
+                "run_id": run_id,
+                "datetime": dt,
+                "symbol": symbol,
+                "name": name,
+                "side": side,
+                "price": price,
+                "quantity": quantity,
+                "strategy": strategy,
+                "reason": reason,
+                "status": "rejected",
+                "reject_reason": reject_reason,
+                "audit_json": _to_json(audit_payload),
+            }
+        )
+
     def execute_pending_signal(self, pending: dict, execution_dt: str, execution_price: float) -> None:
         """Fill or reject a previously generated signal at the execution price."""
 

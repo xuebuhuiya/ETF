@@ -69,8 +69,22 @@ reports/audit_report.md
 - 信号产生时的现金、持仓、均价、底仓是否合理。
 - 次日开盘成交价、滑点、手续费是否被记录。
 - 风控拦截原因，例如 `max_symbol_position_pct`、`max_total_position_pct`。
+- 策略过滤原因，例如 `buy_cooldown_days`、`max_grid_levels`。
 
 推荐先看 Markdown 汇总，再用 CSV 按 `symbol`、`status`、`reject_reason` 筛选明细。
+
+当前网格策略已启用：
+
+```yaml
+strategy:
+  max_grid_levels: 5
+  buy_cooldown_days: 2
+```
+
+这两个参数用于减少下跌阶段连续加仓：
+
+- `max_grid_levels`：限制每只 ETF 的 T 仓最多加几层。
+- `buy_cooldown_days`：同一只 ETF 买入后，至少等待几个交易日才允许下一次买入。
 
 ## 3. 启动本地 API
 

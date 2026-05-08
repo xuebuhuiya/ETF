@@ -39,6 +39,7 @@ strategy:
   grid_pct: 0.006
   take_profit_pct: 0.006
   max_grid_levels: 5
+  buy_cooldown_days: 2
   base_position_pct: 0.5
   trade_amount: 8000
   allow_buy: true

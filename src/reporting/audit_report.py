@@ -46,6 +46,10 @@ def build_audit_rows(signals: list[dict], trades: list[dict]) -> list[dict]:
                 "position_quantity_before_signal": audit.get("position_quantity_before_signal"),
                 "base_quantity_before_signal": audit.get("base_quantity_before_signal"),
                 "planned_quantity": audit.get("planned_quantity"),
+                "current_grid_level": audit.get("current_grid_level"),
+                "max_grid_levels": audit.get("max_grid_levels"),
+                "buy_cooldown_days": audit.get("buy_cooldown_days"),
+                "days_since_last_buy": audit.get("days_since_last_buy"),
                 "cash_before_execution": audit.get("cash_before_execution"),
                 "cash_after_execution": audit.get("cash_after_execution"),
                 "quantity_before_execution": audit.get("quantity_before_execution"),
@@ -149,6 +153,7 @@ def _render_markdown(rows: list[dict]) -> str:
             "- `signal_date`：策略看到 T 日收盘后产生信号的日期。",
             "- `execution_date`：回测在下一根 K 线开盘执行信号的日期。",
             "- `reference_price`、`buy_threshold`、`sell_threshold`：用于核对买卖触发是否符合规则。",
+            "- `current_grid_level`、`max_grid_levels`、`buy_cooldown_days`：用于核对网格层数和冷却期是否生效。",
             "- `cash_before_signal`、`position_quantity_before_signal`：用于核对当时账户状态。",
             "- `reject_reason`：风控拦截原因。",
         ]

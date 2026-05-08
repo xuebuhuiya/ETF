@@ -47,6 +47,7 @@ strategy:
   grid_pct: 0.006
   take_profit_pct: 0.006
   max_grid_levels: 5
+  buy_cooldown_days: 2
   base_position_pct: 0.5
   trade_amount: 8000
 ```
@@ -55,6 +56,8 @@ strategy:
 
 ```text
 当前价 <= 最近参考价 * (1 - grid_pct)
+当前网格层数 < max_grid_levels
+距离上次买入不少于 buy_cooldown_days 个交易日
 现金充足
 当前ETF仓位未超过单只上限
 当天买入次数未超过限制
