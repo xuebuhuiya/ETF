@@ -6,6 +6,7 @@ import argparse
 from datetime import datetime
 
 from src.config import load_config
+from src.data.akshare_data import fetch_etf_daily_bars, parse_symbol_list
 from src.data.sample_data import generate_sample_bars
 from src.reporting.csv_report import write_reports
 from src.storage.parquet_store import ParquetMarketStore
@@ -17,8 +18,19 @@ from src.universe.filter import select_universe
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run ETF T+0 local simulation.")
     parser.add_argument("--config", default="config/config.example.yaml", help="Path to YAML config.")
+    parser.add_argument(
+        "--provider",
+        choices=["sample", "akshare", "local"],
+        default=None,
+        help="Data provider. Defaults to config data.provider unless --sample is used.",
+    )
     parser.add_argument("--sample", action="store_true", help="Use deterministic sample ETF bars.")
     parser.add_argument("--periods", type=int, default=120, help="Business-day sample length.")
+    parser.add_argument(
+        "--symbols",
+        default=None,
+        help="Comma-separated ETF symbols, optionally symbol:name. Example: 510300,159915:创业板ETF",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -26,9 +38,24 @@ def main() -> None:
     state_store.initialize()
 
     market_store = ParquetMarketStore(cfg.parquet_dir)
-    if args.sample:
+    provider = "sample" if args.sample else (args.provider or cfg.raw["data"]["provider"])
+    if provider == "sample":
         sample_bars = generate_sample_bars(start=cfg.raw["data"]["start_date"], periods=args.periods)
         market_store.write_bars(sample_bars, interval=cfg.raw["data"]["bar_interval"])
+    elif provider == "akshare":
+        symbol_arg = args.symbols or ",".join(cfg.raw["data"].get("default_symbols", []))
+        requests = parse_symbol_list(symbol_arg)
+        akshare_bars = fetch_etf_daily_bars(
+            requests,
+            start_date=cfg.raw["data"]["start_date"],
+            end_date=cfg.raw["data"]["end_date"],
+            adjust=cfg.raw["data"].get("adjust", ""),
+        )
+        if akshare_bars.empty:
+            raise RuntimeError("AkShare returned no ETF bars. Check symbols, dates, or network.")
+        market_store.write_bars(akshare_bars, interval=cfg.raw["data"]["bar_interval"])
+    elif provider != "local":
+        raise RuntimeError(f"Unsupported provider: {provider}")
 
     bars = market_store.read_bars(
         interval=cfg.raw["data"]["bar_interval"],
@@ -44,7 +71,7 @@ def main() -> None:
         started_at=started_at,
         strategy_name=cfg.raw["strategy"]["name"],
         initial_cash=cfg.initial_cash,
-        notes="sample data" if args.sample else "local parquet data",
+        notes=f"{provider} data",
     )
 
     backtester = GridTBacktester(cfg.raw, cfg.initial_cash)

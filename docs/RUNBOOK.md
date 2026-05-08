@@ -22,6 +22,35 @@ python -m src.app.run_backtest --sample --periods 120
 - 写入 `data/local.db`。
 - 输出 `reports/signals.csv`、`reports/trades.csv`、`reports/positions.csv`、`reports/daily_summary.csv`、`reports/universe.csv`。
 
+## 2.1 跑一次真实 ETF 日线回测
+
+```powershell
+python -m src.app.run_backtest --provider akshare
+```
+
+默认会拉取配置里的 5 只 ETF：
+
+```text
+510300 沪深300ETF
+510500 中证500ETF
+159915 创业板ETF
+588000 科创50ETF
+518880 黄金ETF
+```
+
+也可以指定少量 ETF：
+
+```powershell
+python -m src.app.run_backtest --provider akshare --symbols 510300,159915,588000
+```
+
+AkShare 数据源说明：
+
+- 优先尝试东方财富 ETF 日线接口。
+- 如果东方财富接口因为网络或代理失败，会自动 fallback 到新浪 ETF 日线接口。
+- 当前标准化字段仍然是 `symbol, name, datetime, open, high, low, close, volume, amount, source, adjust`。
+- `source` 字段会记录实际来源，例如 `akshare_em` 或 `akshare_sina`。
+
 ## 3. 启动本地 API
 
 ```powershell

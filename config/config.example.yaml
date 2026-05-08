@@ -8,7 +8,14 @@ data:
   parquet_dir: data/parquet
   bar_interval: 1d
   start_date: "2024-01-01"
-  end_date: "2026-04-29"
+  end_date: "2026-05-08"
+  adjust: ""
+  default_symbols:
+    - "510300"
+    - "510500"
+    - "159915"
+    - "588000"
+    - "518880"
 
 storage:
   market_store: parquet

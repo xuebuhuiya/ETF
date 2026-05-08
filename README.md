@@ -132,6 +132,13 @@ ETF/
 5. 输出交易日志和收益统计。
 6. 用 FastAPI + React 做一个本地 K 线看板。
 
+当前已支持两种数据模式：
+
+```powershell
+python -m src.app.run_backtest --sample --periods 120
+python -m src.app.run_backtest --provider akshare
+```
+
 ## 运行方式
 
 详见 [RUNBOOK.md](docs/RUNBOOK.md)。
