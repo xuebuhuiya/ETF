@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from math import floor
 
@@ -78,6 +79,7 @@ class SimAccount:
         strategy: str,
         reason: str,
         base_quantity: int | None = None,
+        audit: dict | None = None,
     ) -> None:
         pending = self.submit_signal(
             run_id=run_id,
@@ -90,6 +92,7 @@ class SimAccount:
             strategy=strategy,
             reason=reason,
             base_quantity=base_quantity,
+            audit=audit,
         )
         self.execute_pending_signal(pending, execution_dt=dt, execution_price=price)
 
@@ -106,11 +109,23 @@ class SimAccount:
         strategy: str,
         reason: str,
         base_quantity: int | None = None,
+        audit: dict | None = None,
     ) -> dict:
         """Record a signal without filling it yet."""
 
         quantity = self.round_lot(quantity)
+        signal_id = len(self.signals) + 1
+        audit_payload = dict(audit or {})
+        audit_payload.update(
+            {
+                "signal_id": signal_id,
+                "signal_datetime": dt,
+                "signal_price": round(float(price), 4),
+                "planned_fill_mode": self.broker_config.get("fill_mode", "next_bar_open"),
+            }
+        )
         signal = {
+            "signal_id": signal_id,
             "run_id": run_id,
             "datetime": dt,
             "symbol": symbol,
@@ -122,10 +137,12 @@ class SimAccount:
             "reason": reason,
             "status": "pending",
             "reject_reason": None,
+            "audit_json": _to_json(audit_payload),
         }
         self.signals.append(signal)
         return {
             "signal_index": len(self.signals) - 1,
+            "signal_id": signal_id,
             "run_id": run_id,
             "signal_dt": dt,
             "symbol": symbol,
@@ -136,6 +153,7 @@ class SimAccount:
             "strategy": strategy,
             "reason": reason,
             "base_quantity": base_quantity,
+            "audit": audit_payload,
         }
 
     def execute_pending_signal(self, pending: dict, execution_dt: str, execution_price: float) -> None:
@@ -153,8 +171,20 @@ class SimAccount:
         signal = self.signals[int(pending["signal_index"])]
         signal["status"] = status
         signal["reject_reason"] = reject_reason
+        audit_payload = dict(pending.get("audit") or {})
+        audit_payload.update(
+            {
+                "execution_datetime": execution_dt,
+                "execution_price": round(price, 4),
+                "execution_status": status,
+                "reject_reason": reject_reason,
+                "cash_before_execution": round(self.cash, 2),
+                "total_equity_before_execution": round(self.total_equity(), 2),
+            }
+        )
 
         if reject_reason:
+            signal["audit_json"] = _to_json(audit_payload)
             return
 
         slip_pct = float(self.broker_config["slippage_pct"])
@@ -165,6 +195,8 @@ class SimAccount:
 
         position = self.positions.setdefault(symbol, Position(symbol=symbol, name=name))
         position.last_price = price
+        quantity_before = position.quantity
+        avg_cost_before = position.avg_cost
 
         if side == "buy":
             old_cost = position.avg_cost * position.quantity
@@ -182,14 +214,30 @@ class SimAccount:
         self.trade_count_by_day[execution_dt] = self.trade_count_by_day.get(execution_dt, 0) + 1
         key = (symbol, execution_dt)
         self.trade_count_by_symbol_day[key] = self.trade_count_by_symbol_day.get(key, 0) + 1
+        audit_payload.update(
+            {
+                "fill_price": round(fill_price, 4),
+                "fee": round(fee, 2),
+                "slippage_amount": round(slippage, 2),
+                "cash_after_execution": round(self.cash, 2),
+                "quantity_before_execution": quantity_before,
+                "quantity_after_execution": position.quantity,
+                "avg_cost_before_execution": round(avg_cost_before, 4),
+                "avg_cost_after_execution": round(position.avg_cost, 4),
+            }
+        )
+        signal["audit_json"] = _to_json(audit_payload)
 
         self.trades.append(
             {
+                "signal_id": pending["signal_id"],
                 "run_id": pending["run_id"],
                 "datetime": execution_dt,
+                "signal_datetime": pending["signal_dt"],
                 "symbol": symbol,
                 "name": name,
                 "side": side,
+                "signal_price": round(float(pending["signal_price"]), 4),
                 "price": round(fill_price, 4),
                 "quantity": quantity,
                 "amount": round(amount, 2),
@@ -198,6 +246,7 @@ class SimAccount:
                 "cash_after": round(self.cash, 2),
                 "position_after": position.quantity,
                 "reason": f"{pending['reason']} | signal_date={pending['signal_dt']}",
+                "audit_json": _to_json(audit_payload),
             }
         )
 
@@ -278,3 +327,7 @@ class SimAccount:
                     return "base_position_protected"
 
         return None
+
+
+def _to_json(value: dict) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)

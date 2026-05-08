@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS strategy_runs (
 
 CREATE TABLE IF NOT EXISTS signals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_id INTEGER,
     run_id INTEGER NOT NULL,
     datetime TEXT NOT NULL,
     symbol TEXT NOT NULL,
@@ -29,16 +30,20 @@ CREATE TABLE IF NOT EXISTS signals (
     reason TEXT NOT NULL,
     status TEXT NOT NULL,
     reject_reason TEXT,
+    audit_json TEXT,
     FOREIGN KEY (run_id) REFERENCES strategy_runs(id)
 );
 
 CREATE TABLE IF NOT EXISTS trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_id INTEGER,
     run_id INTEGER NOT NULL,
     datetime TEXT NOT NULL,
+    signal_datetime TEXT,
     symbol TEXT NOT NULL,
     name TEXT NOT NULL,
     side TEXT NOT NULL,
+    signal_price REAL,
     price REAL NOT NULL,
     quantity INTEGER NOT NULL,
     amount REAL NOT NULL,
@@ -47,6 +52,7 @@ CREATE TABLE IF NOT EXISTS trades (
     cash_after REAL NOT NULL,
     position_after INTEGER NOT NULL,
     reason TEXT NOT NULL,
+    audit_json TEXT,
     FOREIGN KEY (run_id) REFERENCES strategy_runs(id)
 );
 
@@ -106,6 +112,7 @@ class SQLiteStore:
     def initialize(self) -> None:
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+            self._ensure_columns(conn)
 
     def create_run(self, started_at: str, strategy_name: str, initial_cash: float, notes: str = "") -> int:
         with self.connect() as conn:
@@ -147,3 +154,23 @@ class SQLiteStore:
         columns = ", ".join(keys)
         values = [tuple(row[key] for key in keys) for row in rows]
         conn.executemany(f"INSERT INTO {table} ({columns}) VALUES ({placeholders})", values)
+
+    @staticmethod
+    def _ensure_columns(conn: sqlite3.Connection) -> None:
+        required = {
+            "signals": {
+                "signal_id": "INTEGER",
+                "audit_json": "TEXT",
+            },
+            "trades": {
+                "signal_id": "INTEGER",
+                "signal_datetime": "TEXT",
+                "signal_price": "REAL",
+                "audit_json": "TEXT",
+            },
+        }
+        for table, columns in required.items():
+            existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+            for name, column_type in columns.items():
+                if name not in existing:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {column_type}")

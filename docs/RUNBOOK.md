@@ -21,6 +21,7 @@ python -m src.app.run_backtest --sample --periods 120
 - 运行网格做T模拟。
 - 写入 `data/local.db`。
 - 输出 `reports/signals.csv`、`reports/trades.csv`、`reports/positions.csv`、`reports/daily_summary.csv`、`reports/universe.csv`。
+- 输出 `reports/audit_report.csv` 和 `reports/audit_report.md`。
 
 ## 2.1 跑一次真实 ETF 日线回测
 
@@ -50,6 +51,26 @@ AkShare 数据源说明：
 - 如果东方财富接口因为网络或代理失败，会自动 fallback 到新浪 ETF 日线接口。
 - 当前标准化字段仍然是 `symbol, name, datetime, open, high, low, close, volume, amount, source, adjust`。
 - `source` 字段会记录实际来源，例如 `akshare_em` 或 `akshare_sina`。
+
+## 2.2 查看策略审计报告
+
+每次回测后会生成：
+
+```text
+reports/audit_report.csv
+reports/audit_report.md
+```
+
+审计报告用于逐笔核对：
+
+- 信号日和实际成交日是否错开。
+- 买入信号是否满足 `price <= reference_price * (1 - grid_pct)`。
+- 卖出信号是否满足 `price >= avg_cost * (1 + take_profit_pct)`。
+- 信号产生时的现金、持仓、均价、底仓是否合理。
+- 次日开盘成交价、滑点、手续费是否被记录。
+- 风控拦截原因，例如 `max_symbol_position_pct`、`max_total_position_pct`。
+
+推荐先看 Markdown 汇总，再用 CSV 按 `symbol`、`status`、`reject_reason` 筛选明细。
 
 ## 3. 启动本地 API
 

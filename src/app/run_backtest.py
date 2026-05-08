@@ -8,6 +8,7 @@ from datetime import datetime
 from src.config import load_config
 from src.data.akshare_data import fetch_etf_daily_bars, parse_symbol_list
 from src.data.sample_data import generate_sample_bars
+from src.reporting.audit_report import write_audit_reports
 from src.reporting.csv_report import write_reports
 from src.storage.parquet_store import ParquetMarketStore
 from src.storage.sqlite_store import SQLiteStore
@@ -108,6 +109,7 @@ def main() -> None:
         snapshots=account.snapshots,
         universe=universe_rows,
     )
+    files.update(write_audit_reports(cfg.reporting_dir, account.signals, account.trades))
 
     final_snapshot = account.snapshots[-1]
     print(f"run_id: {run_id}")

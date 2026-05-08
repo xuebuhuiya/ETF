@@ -59,6 +59,16 @@ class GridTBacktester:
         )
         quantity = self.account.quantity_for_amount(base_budget, price)
         self.reference_prices[symbol] = price
+        audit = self._audit_context(symbol, price)
+        audit.update(
+            {
+                "signal_type": "initialize_base_position",
+                "base_budget": round(base_budget, 2),
+                "base_position_pct": float(self.strategy_config["base_position_pct"]),
+                "max_symbol_position_pct": float(self.risk_config["max_symbol_position_pct"]),
+                "planned_quantity": quantity,
+            }
+        )
         self._submit_signal(
             run_id=run_id,
             dt=dt,
@@ -70,6 +80,7 @@ class GridTBacktester:
             strategy=self.strategy_name,
             reason="initialize_base_position",
             base_quantity=quantity,
+            audit=audit,
         )
 
     def _maybe_trade_grid(self, run_id: int, dt: str, symbol: str, name: str, price: float) -> None:
@@ -86,6 +97,19 @@ class GridTBacktester:
         quantity = self.account.quantity_for_amount(trade_amount, price)
 
         if self.strategy_config.get("allow_buy", True) and price <= reference * (1 - grid_pct):
+            buy_threshold = reference * (1 - grid_pct)
+            audit = self._audit_context(symbol, price)
+            audit.update(
+                {
+                    "signal_type": "grid_buy",
+                    "reference_price": round(reference, 4),
+                    "grid_pct": grid_pct,
+                    "buy_threshold": round(buy_threshold, 4),
+                    "distance_to_reference_pct": round((price / reference) - 1, 6) if reference else None,
+                    "trade_amount": trade_amount,
+                    "planned_quantity": quantity,
+                }
+            )
             self._submit_signal(
                 run_id=run_id,
                 dt=dt,
@@ -96,6 +120,7 @@ class GridTBacktester:
                 quantity=quantity,
                 strategy=self.strategy_name,
                 reason=f"grid_buy price <= reference*(1-{grid_pct})",
+                audit=audit,
             )
             self.reference_prices[symbol] = price
             return
@@ -106,6 +131,20 @@ class GridTBacktester:
             and sellable_t > 0
             and price >= position.avg_cost * (1 + take_profit_pct)
         ):
+            sell_threshold = position.avg_cost * (1 + take_profit_pct)
+            planned_quantity = min(quantity, sellable_t)
+            audit = self._audit_context(symbol, price)
+            audit.update(
+                {
+                    "signal_type": "grid_sell",
+                    "avg_cost": round(position.avg_cost, 4),
+                    "take_profit_pct": take_profit_pct,
+                    "sell_threshold": round(sell_threshold, 4),
+                    "sellable_t_quantity": sellable_t,
+                    "trade_amount": trade_amount,
+                    "planned_quantity": planned_quantity,
+                }
+            )
             self._submit_signal(
                 run_id=run_id,
                 dt=dt,
@@ -113,9 +152,10 @@ class GridTBacktester:
                 name=name,
                 side="sell",
                 price=price,
-                quantity=min(quantity, sellable_t),
+                quantity=planned_quantity,
                 strategy=self.strategy_name,
                 reason=f"grid_sell price >= avg_cost*(1+{take_profit_pct})",
+                audit=audit,
             )
             self.reference_prices[symbol] = price
 
@@ -126,3 +166,20 @@ class GridTBacktester:
             self.pending_by_symbol[pending["symbol"]] = pending
             return
         self.account.execute_signal(**kwargs)
+
+    def _audit_context(self, symbol: str, signal_price: float) -> dict:
+        position = self.account.positions.get(symbol)
+        return {
+            "signal_price": round(signal_price, 4),
+            "fill_mode": self.config["broker_sim"].get("fill_mode", "next_bar_open"),
+            "cash_before_signal": round(self.account.cash, 2),
+            "total_equity_before_signal": round(self.account.total_equity(), 2),
+            "total_market_value_before_signal": round(self.account.total_market_value(), 2),
+            "position_quantity_before_signal": position.quantity if position else 0,
+            "base_quantity_before_signal": position.base_quantity if position else 0,
+            "avg_cost_before_signal": round(position.avg_cost, 4) if position else 0.0,
+            "last_price_before_signal": round(position.last_price, 4) if position else 0.0,
+            "max_total_position_pct": float(self.risk_config["max_total_position_pct"]),
+            "max_symbol_position_pct": float(self.risk_config["max_symbol_position_pct"]),
+            "min_cash_pct": float(self.risk_config["min_cash_pct"]),
+        }

@@ -4,6 +4,7 @@ data/*.db
 data/*.sqlite
 reports/*.csv
 reports/*.html
+reports/*.md
 *.db
 *.sqlite
 *.log

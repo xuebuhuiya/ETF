@@ -117,6 +117,8 @@ ETF/
 - `reports/trades.csv`：每笔模拟交易的时间、ETF、方向、数量、价格、原因。
 - `reports/positions.csv`：当前虚拟持仓。
 - `reports/signals.csv`：触发过但未成交/被风控拦截的信号。
+- `reports/audit_report.csv`：逐笔策略审计明细。
+- `reports/audit_report.md`：策略审计摘要。
 - `reports/report.html`：可视化报告，后续实现。
 - `data/parquet/*.parquet`：ETF 日线、分钟线和实时快照缓存。
 - `data/local.db`：模拟交易、信号、持仓、账户快照和筛选结果。
