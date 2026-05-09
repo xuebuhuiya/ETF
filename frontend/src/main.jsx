@@ -39,10 +39,12 @@ const REGIME_LABELS = {
 };
 
 function formatNumber(value, digits = 2) {
+  if (value === null || value === undefined || value === '') return '-';
   return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '-';
 }
 
 function formatPct(value) {
+  if (value === null || value === undefined || value === '') return '-';
   return Number.isFinite(Number(value)) ? `${(Number(value) * 100).toFixed(2)}%` : '-';
 }
 
@@ -54,6 +56,11 @@ function rejectLabel(reason) {
   return REJECT_REASON_LABELS[reason] ?? reason ?? '-';
 }
 
+function valueClass(value) {
+  if (value === null || value === undefined || value === '') return '';
+  return Number(value) >= 0 ? 'positive' : 'negative';
+}
+
 function cleanReason(reason) {
   if (!reason) return '-';
   if (reason.includes('initialize_base_position')) return '建立底仓';
@@ -63,7 +70,11 @@ function cleanReason(reason) {
 }
 
 function sameDate(row, dateKey = 'datetime', currentDate = '') {
-  return row[dateKey] === currentDate;
+  return dateKeyOf(row[dateKey]) === dateKeyOf(currentDate);
+}
+
+function dateKeyOf(value) {
+  return String(value ?? '').slice(0, 10);
 }
 
 async function fetchJson(path) {
@@ -160,7 +171,11 @@ function EquityChart({ rows, benchmarks }) {
     const benchmarkByVariant = Object.fromEntries(
       benchmarkVariants.map((variant) => [
         variant,
-        Object.fromEntries(benchmarks.filter((row) => row.variant === variant).map((row) => [row.date, row.total_equity])),
+        Object.fromEntries(
+          benchmarks
+            .filter((row) => row.variant === variant)
+            .map((row) => [dateKeyOf(row.date), row.total_equity]),
+        ),
       ]),
     );
 
@@ -184,7 +199,7 @@ function EquityChart({ rows, benchmarks }) {
           type: 'line',
           smooth: true,
           showSymbol: false,
-          data: rows.map((row) => benchmarkByVariant[variant][row.date] ?? null),
+          data: rows.map((row) => benchmarkByVariant[variant][dateKeyOf(row.date)] ?? null),
           lineStyle: {
             color: index === 0 ? '#f59e0b' : '#64748b',
             type: index === 0 ? 'solid' : 'dashed',
@@ -225,13 +240,115 @@ function BenchmarkOverview({ currentSnapshot, currentBenchmarks }) {
         </div>
         <div>
           <span>策略相对70%基准</span>
-          <strong className={fairExcess === null ? '' : fairExcess >= 0 ? 'positive' : 'negative'}>
-            {formatPct(fairExcess)}
-          </strong>
+          <strong className={valueClass(fairExcess)}>{formatPct(fairExcess)}</strong>
         </div>
       </div>
     </section>
   );
+}
+
+function ScenarioComparison({ currentBar, visibleTrades }) {
+  const scenario = useMemo(() => buildReduceThenHoldScenario(visibleTrades, currentBar), [visibleTrades, currentBar]);
+
+  return (
+    <section>
+      <h3>减仓后停止交易对比</h3>
+      <div className="metrics scenario">
+        <div>
+          <span>当前策略ETF盈亏</span>
+          <strong className={valueClass(scenario.current.pnl)}>
+            {formatNumber(scenario.current.pnl)}
+          </strong>
+        </div>
+        <div>
+          <span>当前策略收益率</span>
+          <strong className={valueClass(scenario.current.returnPct)}>
+            {formatPct(scenario.current.returnPct)}
+          </strong>
+        </div>
+        <div>
+          <span>首次减仓后不动盈亏</span>
+          <strong className={valueClass(scenario.holdAfterFirstSell.pnl)}>
+            {formatNumber(scenario.holdAfterFirstSell.pnl)}
+          </strong>
+        </div>
+        <div>
+          <span>首次减仓后不动收益率</span>
+          <strong className={valueClass(scenario.holdAfterFirstSell.returnPct)}>
+            {formatPct(scenario.holdAfterFirstSell.returnPct)}
+          </strong>
+        </div>
+        <div>
+          <span>首次减仓日期</span>
+          <strong>{scenario.firstSellDate ?? '-'}</strong>
+        </div>
+        <div>
+          <span>假设相对当前策略</span>
+          <strong className={valueClass(scenario.diff)}>{formatNumber(scenario.diff)}</strong>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function buildReduceThenHoldScenario(trades, currentBar) {
+  const close = Number(currentBar?.close);
+  const empty = {
+    firstSellDate: null,
+    diff: null,
+    current: { pnl: null, returnPct: null },
+    holdAfterFirstSell: { pnl: null, returnPct: null },
+  };
+  if (!Number.isFinite(close) || trades.length === 0) return empty;
+
+  const current = evaluateTradePath(trades, close);
+  const firstSellIndex = trades.findIndex((trade) => trade.side === 'sell');
+  if (firstSellIndex < 0) {
+    return {
+      ...empty,
+      current,
+      diff: null,
+    };
+  }
+
+  const holdTrades = trades.slice(0, firstSellIndex + 1);
+  const holdAfterFirstSell = evaluateTradePath(holdTrades, close);
+  return {
+    firstSellDate: trades[firstSellIndex].datetime,
+    current,
+    holdAfterFirstSell,
+    diff:
+      Number.isFinite(Number(holdAfterFirstSell.pnl)) && Number.isFinite(Number(current.pnl))
+        ? holdAfterFirstSell.pnl - current.pnl
+        : null,
+  };
+}
+
+function evaluateTradePath(trades, close) {
+  let quantity = 0;
+  let cashFlow = 0;
+  let invested = 0;
+
+  for (const trade of trades) {
+    const amount = Number(trade.amount) || 0;
+    const fee = Number(trade.fee) || 0;
+    const tradeQuantity = Number(trade.quantity) || 0;
+    if (trade.side === 'buy') {
+      quantity += tradeQuantity;
+      cashFlow -= amount + fee;
+      invested += amount + fee;
+    } else {
+      quantity -= tradeQuantity;
+      cashFlow += amount - fee;
+    }
+  }
+
+  const pnl = cashFlow + quantity * close;
+  return {
+    pnl,
+    returnPct: invested > 0 ? pnl / invested : null,
+    quantity,
+  };
 }
 
 function PlaybackControls({ dates, index, playing, onIndexChange, onPlayingChange }) {
@@ -330,7 +447,7 @@ function ReplayPosition({ selectedName, currentBar, visibleTrades }) {
         </div>
         <div>
           <span>估算浮盈亏</span>
-          <strong className={pnl === null ? '' : pnl >= 0 ? 'positive' : 'negative'}>{formatNumber(pnl)}</strong>
+          <strong className={valueClass(pnl)}>{formatNumber(pnl)}</strong>
         </div>
       </div>
     </section>
@@ -468,7 +585,7 @@ function RegimeSummary({ rows }) {
               <td>{row.days}</td>
               <td>{formatPct(row.strategy_return)}</td>
               <td>{formatPct(row.benchmark_return)}</td>
-              <td className={row.excess_return >= 0 ? 'positive' : 'negative'}>{formatPct(row.excess_return)}</td>
+              <td className={valueClass(row.excess_return)}>{formatPct(row.excess_return)}</td>
               <td>{formatPct(row.strategy_max_drawdown)}</td>
               <td>{row.trade_count}</td>
             </tr>
@@ -512,7 +629,10 @@ function EtfDetailPage({
     <>
       <KlineChart bars={visibleBars} trades={visibleTrades} signals={visibleSignals} />
       <div className="detail-grid">
-        <ReplayPosition selectedName={selectedName} currentBar={currentBar} visibleTrades={visibleTrades} />
+        <div>
+          <ReplayPosition selectedName={selectedName} currentBar={currentBar} visibleTrades={visibleTrades} />
+          <ScenarioComparison currentBar={currentBar} visibleTrades={visibleTrades} />
+        </div>
         <StrategyCheck
           currentDate={currentDate}
           currentBar={currentBar}
@@ -600,17 +720,17 @@ function App() {
     [signals, currentDate],
   );
   const visibleEquity = useMemo(
-    () => equityRows.filter((row) => row.date <= currentDate),
+    () => equityRows.filter((row) => dateKeyOf(row.date) <= dateKeyOf(currentDate)),
     [equityRows, currentDate],
   );
   const visibleBenchmarks = useMemo(
-    () => benchmarkRows.filter((row) => row.date <= currentDate),
+    () => benchmarkRows.filter((row) => dateKeyOf(row.date) <= dateKeyOf(currentDate)),
     [benchmarkRows, currentDate],
   );
   const currentBar = visibleBars[visibleBars.length - 1];
   const currentSnapshot = visibleEquity[visibleEquity.length - 1];
   const currentBenchmarks = useMemo(
-    () => benchmarkRows.filter((row) => row.date === currentDate),
+    () => benchmarkRows.filter((row) => dateKeyOf(row.date) === dateKeyOf(currentDate)),
     [benchmarkRows, currentDate],
   );
   const pageTitle = activeView === 'overview' ? '账户总览' : selectedName;
