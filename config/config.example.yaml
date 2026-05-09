@@ -44,6 +44,13 @@ strategy:
   trade_amount: 8000
   allow_buy: true
   allow_sell: true
+  trend_filter:
+    enabled: true
+    ma_short: 20
+    ma_long: 60
+    block_buy_below_ma_long: true
+    require_short_ma_below_long_ma: true
+    require_ma_short_above_ma_long: false
 
 broker_sim:
   lot_size: 100

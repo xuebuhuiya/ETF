@@ -79,12 +79,37 @@ reports/audit_report.md
 strategy:
   max_grid_levels: 5
   buy_cooldown_days: 2
+  trend_filter:
+    enabled: true
+    ma_short: 20
+    ma_long: 60
 ```
 
 这两个参数用于减少下跌阶段连续加仓：
 
 - `max_grid_levels`：限制每只 ETF 的 T 仓最多加几层。
 - `buy_cooldown_days`：同一只 ETF 买入后，至少等待几个交易日才允许下一次买入。
+- `trend_filter`：当价格低于长均线，且短均线也弱于长均线时，拦截新增网格买入。
+
+## 2.3 对比策略参数
+
+在已经有本地行情 Parquet 后，可以运行：
+
+```powershell
+python -m src.app.compare_strategy_params
+```
+
+它会对比：
+
+- 关闭趋势过滤。
+- 当前确认下跌趋势过滤。
+- 严格低于长均线过滤。
+
+输出文件：
+
+```text
+reports/strategy_comparison.csv
+```
 
 ## 3. 运行基础测试
 

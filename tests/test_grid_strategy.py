@@ -10,6 +10,7 @@ def _config(
     fill_mode: str = "next_bar_open",
     max_grid_levels: int = 5,
     buy_cooldown_days: int = 0,
+    trend_filter: dict | None = None,
 ) -> dict:
     return {
         "strategy": {
@@ -21,6 +22,7 @@ def _config(
             "trade_amount": 10_000,
             "allow_buy": True,
             "allow_sell": True,
+            "trend_filter": trend_filter or {"enabled": False},
         },
         "broker_sim": {
             "lot_size": 100,
@@ -112,3 +114,28 @@ def test_max_grid_levels_records_rejected_grid_buy() -> None:
     rejected = [signal for signal in account.signals if signal["status"] == "rejected"]
     assert [signal["reject_reason"] for signal in rejected] == ["max_grid_levels"]
     assert len(account.trades) == 2
+
+
+def test_trend_filter_records_rejected_grid_buy() -> None:
+    account = GridTBacktester(
+        _config(
+            trend_filter={
+                "enabled": True,
+                "ma_short": 2,
+                "ma_long": 3,
+                "block_buy_below_ma_long": True,
+                "require_short_ma_below_long_ma": True,
+                "require_ma_short_above_ma_long": False,
+            }
+        ),
+        initial_cash=100_000,
+    ).run(
+        run_id=1,
+        bars=_bars(closes=[10, 10, 9], opens=[10, 10, 10]),
+        universe=_universe(),
+    )
+
+    rejected = [signal for signal in account.signals if signal["status"] == "rejected"]
+    assert [signal["reject_reason"] for signal in rejected] == ["trend_filter"]
+    assert '"trend_filter_reason": "downtrend_below_ma_long"' in rejected[0]["audit_json"]
+    assert len(account.trades) == 1

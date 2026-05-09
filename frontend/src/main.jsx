@@ -24,6 +24,7 @@ const REJECT_REASON_LABELS = {
   base_position_protected: '底仓保护',
   buy_cooldown_days: '买入冷却期',
   max_grid_levels: '网格层数上限',
+  trend_filter: '趋势过滤',
   quantity_not_lot_sized: '份额不足一手',
 };
 

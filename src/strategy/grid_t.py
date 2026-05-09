@@ -26,6 +26,7 @@ class GridTBacktester:
     def run(self, run_id: int, bars: pd.DataFrame, universe: pd.DataFrame) -> SimAccount:
         selected_symbols = set(universe["symbol"].tolist())
         frame = bars[bars["symbol"].isin(selected_symbols)].sort_values(["datetime", "symbol"])
+        frame = self._with_trend_columns(frame)
 
         for day_index, (dt, day_bars) in enumerate(frame.groupby("datetime", sort=True)):
             self.current_day_index = day_index
@@ -34,10 +35,11 @@ class GridTBacktester:
             for row in day_bars.itertuples(index=False):
                 open_price = float(row.open)
                 close_price = float(row.close)
+                trend_context = self._trend_context(row, close_price)
                 self._execute_pending_at_open(dt_string, row.symbol, open_price)
                 self.account.update_price(row.symbol, row.name, close_price)
-                self._maybe_initialize_base(run_id, dt_string, row.symbol, row.name, close_price)
-                self._maybe_trade_grid(run_id, dt_string, row.symbol, row.name, close_price)
+                self._maybe_initialize_base(run_id, dt_string, row.symbol, row.name, close_price, trend_context)
+                self._maybe_trade_grid(run_id, dt_string, row.symbol, row.name, close_price, trend_context)
 
             self.account.record_snapshot(run_id, dt_string)
 
@@ -57,7 +59,15 @@ class GridTBacktester:
         elif pending["side"] == "sell":
             self.grid_levels[symbol] = max(0, self.grid_levels.get(symbol, 0) - 1)
 
-    def _maybe_initialize_base(self, run_id: int, dt: str, symbol: str, name: str, price: float) -> None:
+    def _maybe_initialize_base(
+        self,
+        run_id: int,
+        dt: str,
+        symbol: str,
+        name: str,
+        price: float,
+        trend_context: dict | None = None,
+    ) -> None:
         position = self.account.positions.get(symbol)
         if position and position.base_quantity > 0:
             return
@@ -71,7 +81,7 @@ class GridTBacktester:
         )
         quantity = self.account.quantity_for_amount(base_budget, price)
         self.reference_prices[symbol] = price
-        audit = self._audit_context(symbol, price)
+        audit = self._audit_context(symbol, price, trend_context)
         audit.update(
             {
                 "signal_type": "initialize_base_position",
@@ -95,7 +105,15 @@ class GridTBacktester:
             audit=audit,
         )
 
-    def _maybe_trade_grid(self, run_id: int, dt: str, symbol: str, name: str, price: float) -> None:
+    def _maybe_trade_grid(
+        self,
+        run_id: int,
+        dt: str,
+        symbol: str,
+        name: str,
+        price: float,
+        trend_context: dict | None = None,
+    ) -> None:
         position = self.account.positions.get(symbol)
         if position is None or position.quantity <= 0:
             return
@@ -116,7 +134,7 @@ class GridTBacktester:
             days_since_last_buy = self._days_since_last_buy(symbol)
 
             buy_threshold = reference * (1 - grid_pct)
-            audit = self._audit_context(symbol, price)
+            audit = self._audit_context(symbol, price, trend_context)
             audit.update(
                 {
                     "signal_type": "grid_buy",
@@ -132,6 +150,21 @@ class GridTBacktester:
                     "days_since_last_buy": days_since_last_buy,
                 }
             )
+            if not audit.get("trend_filter_pass", True):
+                self.account.record_rejected_signal(
+                    run_id=run_id,
+                    dt=dt,
+                    symbol=symbol,
+                    name=name,
+                    side="buy",
+                    price=price,
+                    quantity=quantity,
+                    strategy=self.strategy_name,
+                    reason=f"grid_buy price <= reference*(1-{grid_pct})",
+                    reject_reason="trend_filter",
+                    audit=audit,
+                )
+                return
             if max_grid_levels and current_grid_level >= max_grid_levels:
                 self.account.record_rejected_signal(
                     run_id=run_id,
@@ -185,7 +218,7 @@ class GridTBacktester:
         ):
             sell_threshold = position.avg_cost * (1 + take_profit_pct)
             planned_quantity = min(quantity, sellable_t)
-            audit = self._audit_context(symbol, price)
+            audit = self._audit_context(symbol, price, trend_context)
             audit.update(
                 {
                     "signal_type": "grid_sell",
@@ -227,9 +260,64 @@ class GridTBacktester:
             return None
         return self.current_day_index - last_day
 
-    def _audit_context(self, symbol: str, signal_price: float) -> dict:
-        position = self.account.positions.get(symbol)
+    def _with_trend_columns(self, frame: pd.DataFrame) -> pd.DataFrame:
+        trend_config = self.strategy_config.get("trend_filter", {})
+        if not trend_config.get("enabled", False):
+            return frame
+
+        ma_short = int(trend_config.get("ma_short", 20))
+        ma_long = int(trend_config.get("ma_long", 60))
+        frame = frame.copy()
+        frame["trend_ma_short"] = frame.groupby("symbol")["close"].transform(
+            lambda series: series.rolling(window=ma_short, min_periods=ma_short).mean()
+        )
+        frame["trend_ma_long"] = frame.groupby("symbol")["close"].transform(
+            lambda series: series.rolling(window=ma_long, min_periods=ma_long).mean()
+        )
+        return frame
+
+    def _trend_context(self, row: object, price: float) -> dict:
+        trend_config = self.strategy_config.get("trend_filter", {})
+        enabled = bool(trend_config.get("enabled", False))
+        if not enabled:
+            return {
+                "trend_filter_enabled": False,
+                "trend_filter_pass": True,
+                "trend_filter_status": "disabled",
+            }
+
+        ma_short = _float_or_none(getattr(row, "trend_ma_short", None))
+        ma_long = _float_or_none(getattr(row, "trend_ma_long", None))
+        short_window = int(trend_config.get("ma_short", 20))
+        long_window = int(trend_config.get("ma_long", 60))
+        reasons: list[str] = []
+
+        if ma_short is None or ma_long is None:
+            status = "not_ready"
+        else:
+            if trend_config.get("block_buy_below_ma_long", True) and price < ma_long:
+                require_short_below = trend_config.get("require_short_ma_below_long_ma", True)
+                if not require_short_below or ma_short < ma_long:
+                    reasons.append("downtrend_below_ma_long")
+            if trend_config.get("require_ma_short_above_ma_long", False) and ma_short <= ma_long:
+                reasons.append("ma_short_not_above_ma_long")
+            status = "blocked" if reasons else "pass"
+
         return {
+            "trend_filter_enabled": True,
+            "trend_filter_pass": not reasons,
+            "trend_filter_status": status,
+            "trend_filter_reason": ",".join(reasons) if reasons else None,
+            "trend_ma_short_window": short_window,
+            "trend_ma_long_window": long_window,
+            "trend_ma_short": round(ma_short, 4) if ma_short is not None else None,
+            "trend_ma_long": round(ma_long, 4) if ma_long is not None else None,
+            "price_vs_ma_long_pct": round((price / ma_long) - 1, 6) if ma_long else None,
+        }
+
+    def _audit_context(self, symbol: str, signal_price: float, trend_context: dict | None = None) -> dict:
+        position = self.account.positions.get(symbol)
+        audit = {
             "signal_price": round(signal_price, 4),
             "fill_mode": self.config["broker_sim"].get("fill_mode", "next_bar_open"),
             "cash_before_signal": round(self.account.cash, 2),
@@ -247,3 +335,11 @@ class GridTBacktester:
             "buy_cooldown_days": int(self.strategy_config.get("buy_cooldown_days", 0)),
             "days_since_last_buy": self._days_since_last_buy(symbol),
         }
+        audit.update(trend_context or {})
+        return audit
+
+
+def _float_or_none(value: object) -> float | None:
+    if value is None or pd.isna(value):
+        return None
+    return float(value)
