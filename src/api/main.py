@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -33,6 +34,19 @@ def _connect() -> sqlite3.Connection:
 def _rows(sql: str, params: tuple = ()) -> list[dict]:
     with _connect() as conn:
         return [dict(row) for row in conn.execute(sql, params).fetchall()]
+
+
+def _with_audit(rows: list[dict]) -> list[dict]:
+    for row in rows:
+        audit_json = row.pop("audit_json", None)
+        if not audit_json:
+            row["audit"] = {}
+            continue
+        try:
+            row["audit"] = json.loads(audit_json)
+        except json.JSONDecodeError:
+            row["audit"] = {}
+    return rows
 
 
 def _latest_run_id() -> int | None:
@@ -90,24 +104,28 @@ def signals(symbol: str | None = None, run_id: int | None = None) -> list[dict]:
     if run_id is None:
         return []
     if symbol:
-        return _rows(
+        rows = _rows(
             """
-            SELECT datetime, symbol, name, side, price, quantity, strategy, reason, status, reject_reason
+            SELECT signal_id, datetime, symbol, name, side, price, quantity,
+                   strategy, reason, status, reject_reason, audit_json
             FROM signals
             WHERE run_id = ? AND symbol = ?
             ORDER BY datetime, id
             """,
             (run_id, symbol),
         )
-    return _rows(
+        return _with_audit(rows)
+    rows = _rows(
         """
-        SELECT datetime, symbol, name, side, price, quantity, strategy, reason, status, reject_reason
+        SELECT signal_id, datetime, symbol, name, side, price, quantity,
+               strategy, reason, status, reject_reason, audit_json
         FROM signals
         WHERE run_id = ?
         ORDER BY datetime, id
         """,
         (run_id,),
     )
+    return _with_audit(rows)
 
 
 @app.get("/api/trades")
@@ -116,24 +134,30 @@ def trades(symbol: str | None = None, run_id: int | None = None) -> list[dict]:
     if run_id is None:
         return []
     if symbol:
-        return _rows(
+        rows = _rows(
             """
-            SELECT datetime, symbol, name, side, price, quantity, amount, fee, slippage, cash_after, position_after, reason
+            SELECT signal_id, datetime, signal_datetime, symbol, name, side,
+                   signal_price, price, quantity, amount, fee, slippage,
+                   cash_after, position_after, reason, audit_json
             FROM trades
             WHERE run_id = ? AND symbol = ?
             ORDER BY datetime, id
             """,
             (run_id, symbol),
         )
-    return _rows(
+        return _with_audit(rows)
+    rows = _rows(
         """
-        SELECT datetime, symbol, name, side, price, quantity, amount, fee, slippage, cash_after, position_after, reason
+        SELECT signal_id, datetime, signal_datetime, symbol, name, side,
+               signal_price, price, quantity, amount, fee, slippage,
+               cash_after, position_after, reason, audit_json
         FROM trades
         WHERE run_id = ?
         ORDER BY datetime, id
         """,
         (run_id,),
     )
+    return _with_audit(rows)
 
 
 @app.get("/api/positions")

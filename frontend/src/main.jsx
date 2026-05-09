@@ -10,6 +10,50 @@ const STATUS_LABELS = {
   rejected: '已拦截',
   pending: '待成交',
 };
+const SIDE_LABELS = {
+  buy: '买入',
+  sell: '卖出',
+};
+const REJECT_REASON_LABELS = {
+  max_symbol_position_pct: '单只 ETF 仓位上限',
+  max_total_position_pct: '总仓位上限',
+  min_cash_pct: '现金保留不足',
+  insufficient_cash: '现金不足',
+  max_trades_per_day: '单日成交次数上限',
+  max_trades_per_symbol_per_day: '单只 ETF 单日成交次数上限',
+  base_position_protected: '底仓保护',
+  buy_cooldown_days: '买入冷却期',
+  max_grid_levels: '网格层数上限',
+  quantity_not_lot_sized: '份额不足一手',
+};
+
+function formatNumber(value, digits = 2) {
+  return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '-';
+}
+
+function formatPct(value) {
+  return Number.isFinite(Number(value)) ? `${(Number(value) * 100).toFixed(2)}%` : '-';
+}
+
+function sideLabel(side) {
+  return SIDE_LABELS[side] ?? side;
+}
+
+function rejectLabel(reason) {
+  return REJECT_REASON_LABELS[reason] ?? reason ?? '-';
+}
+
+function cleanReason(reason) {
+  if (!reason) return '-';
+  if (reason.includes('initialize_base_position')) return '建立底仓';
+  if (reason.includes('grid_buy')) return '网格买入触发';
+  if (reason.includes('grid_sell')) return '止盈卖出触发';
+  return reason;
+}
+
+function sameDate(row, dateKey = 'datetime', currentDate = '') {
+  return row[dateKey] === currentDate;
+}
 
 async function fetchJson(path) {
   const response = await fetch(`${API_BASE}${path}`);
@@ -19,7 +63,7 @@ async function fetchJson(path) {
   return response.json();
 }
 
-function KlineChart({ bars, trades }) {
+function KlineChart({ bars, trades, signals }) {
   useEffect(() => {
     let chart;
     const element = document.getElementById('kline-chart');
@@ -49,13 +93,24 @@ function KlineChart({ bars, trades }) {
     );
     createSeriesMarkers(
       candleSeries,
-      trades.map((trade) => ({
-        time: trade.datetime,
-        position: trade.side === 'buy' ? 'belowBar' : 'aboveBar',
-        color: trade.side === 'buy' ? '#16a34a' : '#dc2626',
-        shape: trade.side === 'buy' ? 'arrowUp' : 'arrowDown',
-        text: `${trade.side} ${trade.quantity}`,
-      })),
+      [
+        ...trades.map((trade) => ({
+          time: trade.datetime,
+          position: trade.side === 'buy' ? 'belowBar' : 'aboveBar',
+          color: trade.side === 'buy' ? '#16a34a' : '#dc2626',
+          shape: trade.side === 'buy' ? 'arrowUp' : 'arrowDown',
+          text: `${sideLabel(trade.side)} ${trade.quantity}`,
+        })),
+        ...signals
+          .filter((signal) => signal.status === 'rejected')
+          .map((signal) => ({
+            time: signal.datetime,
+            position: signal.side === 'buy' ? 'belowBar' : 'aboveBar',
+            color: '#f59e0b',
+            shape: 'circle',
+            text: `拦截 ${rejectLabel(signal.reject_reason)}`,
+          })),
+      ],
     );
 
     const volumeSeries = chart.addSeries(HistogramSeries, {
@@ -75,7 +130,7 @@ function KlineChart({ bars, trades }) {
     return () => {
       if (chart) chart.remove();
     };
-  }, [bars, trades]);
+  }, [bars, trades, signals]);
 
   return <div id="kline-chart" className="chart" />;
 }
@@ -97,7 +152,7 @@ function EquityChart({ rows }) {
       yAxis: { type: 'value', scale: true },
       series: [
         {
-          name: 'Total Equity',
+          name: '总资产',
           type: 'line',
           smooth: true,
           data: rows.map((row) => row.total_equity),
@@ -145,32 +200,29 @@ function PlaybackControls({ dates, index, playing, onIndexChange, onPlayingChang
 }
 
 function AccountOverview({ currentSnapshot }) {
-  const totalReturn = currentSnapshot ? `${(currentSnapshot.total_return * 100).toFixed(2)}%` : '-';
-  const maxDrawdown = currentSnapshot ? `${(currentSnapshot.max_drawdown * 100).toFixed(2)}%` : '-';
-
   return (
     <section>
       <h3>账户总览</h3>
       <div className="metrics account">
         <div>
           <span>现金</span>
-          <strong>{currentSnapshot ? currentSnapshot.cash.toFixed(2) : '-'}</strong>
+          <strong>{formatNumber(currentSnapshot?.cash)}</strong>
         </div>
         <div>
           <span>持仓市值</span>
-          <strong>{currentSnapshot ? currentSnapshot.market_value.toFixed(2) : '-'}</strong>
+          <strong>{formatNumber(currentSnapshot?.market_value)}</strong>
         </div>
         <div>
           <span>总资产</span>
-          <strong>{currentSnapshot ? currentSnapshot.total_equity.toFixed(2) : '-'}</strong>
+          <strong>{formatNumber(currentSnapshot?.total_equity)}</strong>
         </div>
         <div>
           <span>累计收益率</span>
-          <strong>{totalReturn}</strong>
+          <strong>{formatPct(currentSnapshot?.total_return)}</strong>
         </div>
         <div>
           <span>最大回撤</span>
-          <strong>{maxDrawdown}</strong>
+          <strong>{formatPct(currentSnapshot?.max_drawdown)}</strong>
         </div>
         <div>
           <span>成交次数</span>
@@ -181,12 +233,93 @@ function AccountOverview({ currentSnapshot }) {
   );
 }
 
-function StrategyCheck({ currentBar, currentSnapshot, visibleTrades, visibleSignals }) {
+function ReplayPosition({ selectedName, currentBar, visibleTrades }) {
+  const lastTrade = visibleTrades[visibleTrades.length - 1];
+  const quantity = lastTrade?.position_after ?? 0;
+  const avgCost = lastTrade?.audit?.avg_cost_after_execution;
+  const marketValue = currentBar ? quantity * currentBar.close : 0;
+  const pnl = Number.isFinite(Number(avgCost)) && currentBar ? (currentBar.close - avgCost) * quantity : null;
+
+  return (
+    <section>
+      <h3>当前回放持仓</h3>
+      <div className="metrics position">
+        <div>
+          <span>标的</span>
+          <strong>{selectedName}</strong>
+        </div>
+        <div>
+          <span>持仓份额</span>
+          <strong>{quantity}</strong>
+        </div>
+        <div>
+          <span>当前收盘价</span>
+          <strong>{formatNumber(currentBar?.close, 4)}</strong>
+        </div>
+        <div>
+          <span>平均成本</span>
+          <strong>{formatNumber(avgCost, 4)}</strong>
+        </div>
+        <div>
+          <span>持仓市值</span>
+          <strong>{formatNumber(marketValue)}</strong>
+        </div>
+        <div>
+          <span>估算浮盈亏</span>
+          <strong className={pnl === null ? '' : pnl >= 0 ? 'positive' : 'negative'}>{formatNumber(pnl)}</strong>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ActivityTable({ title, rows, type }) {
+  return (
+    <section>
+      <h3>{title}</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>日期</th>
+            <th>方向</th>
+            <th>份额</th>
+            <th>{type === 'trade' ? '成交价' : '信号价'}</th>
+            <th>{type === 'trade' ? '信号日期' : '状态'}</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr>
+              <td colSpan="6" className="empty">当天没有记录</td>
+            </tr>
+          ) : (
+            rows.map((row, index) => (
+              <tr key={`${type}-${row.datetime}-${row.signal_id ?? index}-${index}`}>
+                <td>{row.datetime}</td>
+                <td className={row.side}>{sideLabel(row.side)}</td>
+                <td>{row.quantity}</td>
+                <td>{formatNumber(row.price, 4)}</td>
+                <td>
+                  {type === 'trade' ? row.signal_datetime : STATUS_LABELS[row.status] ?? row.status}
+                </td>
+                <td>{row.reject_reason ? rejectLabel(row.reject_reason) : cleanReason(row.reason)}</td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+function StrategyCheck({ currentDate, currentBar, currentSnapshot, visibleTrades, visibleSignals }) {
   const filledSignals = visibleSignals.filter((signal) => signal.status === 'filled').length;
   const rejectedSignals = visibleSignals.filter((signal) => signal.status === 'rejected').length;
   const pendingSignals = visibleSignals.filter((signal) => signal.status === 'pending').length;
-  const lastTrades = visibleTrades.slice(-8).reverse();
   const lastSignals = visibleSignals.slice(-8).reverse();
+  const todaySignals = visibleSignals.filter((signal) => sameDate(signal, 'datetime', currentDate));
+  const todayTrades = visibleTrades.filter((trade) => sameDate(trade, 'datetime', currentDate));
 
   return (
     <section>
@@ -194,11 +327,11 @@ function StrategyCheck({ currentBar, currentSnapshot, visibleTrades, visibleSign
       <div className="metrics">
         <div>
           <span>当前收盘价</span>
-          <strong>{currentBar ? currentBar.close.toFixed(4) : '-'}</strong>
+          <strong>{formatNumber(currentBar?.close, 4)}</strong>
         </div>
         <div>
           <span>当前总资产</span>
-          <strong>{currentSnapshot ? currentSnapshot.total_equity.toFixed(2) : '-'}</strong>
+          <strong>{formatNumber(currentSnapshot?.total_equity)}</strong>
         </div>
         <div>
           <span>已成交信号/总信号</span>
@@ -212,7 +345,16 @@ function StrategyCheck({ currentBar, currentSnapshot, visibleTrades, visibleSign
           <span>待次日成交</span>
           <strong>{pendingSignals}</strong>
         </div>
+        <div>
+          <span>当天成交/信号</span>
+          <strong>{todayTrades.length}/{todaySignals.length}</strong>
+        </div>
       </div>
+      <div className="activity-grid">
+        <ActivityTable title="当天信号" rows={todaySignals} type="signal" />
+        <ActivityTable title="当天成交" rows={todayTrades} type="trade" />
+      </div>
+      <h3>最近信号</h3>
       <table>
         <thead>
           <tr>
@@ -227,35 +369,10 @@ function StrategyCheck({ currentBar, currentSnapshot, visibleTrades, visibleSign
           {lastSignals.map((row, index) => (
             <tr key={`${row.datetime}-${row.side}-${index}`}>
               <td>{row.datetime}</td>
-              <td className={row.side}>{row.side === 'buy' ? '买入' : '卖出'}</td>
+              <td className={row.side}>{sideLabel(row.side)}</td>
               <td>{row.quantity}</td>
               <td>{STATUS_LABELS[row.status] ?? row.status}</td>
-              <td>{row.reject_reason || row.reason}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <h3>当前可见成交</h3>
-      <table>
-        <thead>
-          <tr>
-            <th>日期</th>
-            <th>名称</th>
-            <th>方向</th>
-            <th>份额</th>
-            <th>价格</th>
-            <th>原因</th>
-          </tr>
-        </thead>
-        <tbody>
-          {lastTrades.map((row, index) => (
-            <tr key={`${row.datetime}-${row.symbol}-${index}`}>
-                  <td>{row.datetime}</td>
-                  <td>{row.name}</td>
-                  <td className={row.side}>{row.side === 'buy' ? '买入' : '卖出'}</td>
-                  <td>{row.quantity}</td>
-                  <td>{row.price.toFixed(4)}</td>
-              <td>{row.reason}</td>
+              <td>{row.reject_reason ? rejectLabel(row.reject_reason) : cleanReason(row.reason)}</td>
             </tr>
           ))}
         </tbody>
@@ -266,7 +383,6 @@ function StrategyCheck({ currentBar, currentSnapshot, visibleTrades, visibleSign
 
 function App() {
   const [universe, setUniverse] = useState([]);
-  const [positions, setPositions] = useState([]);
   const [equityRows, setEquityRows] = useState([]);
   const [bars, setBars] = useState([]);
   const [trades, setTrades] = useState([]);
@@ -278,11 +394,9 @@ function App() {
   useEffect(() => {
     Promise.all([
       fetchJson('/api/universe'),
-      fetchJson('/api/positions'),
       fetchJson('/api/account/equity'),
-    ]).then(([universeRows, positionRows, equityData]) => {
+    ]).then(([universeRows, equityData]) => {
       setUniverse(universeRows);
-      setPositions(positionRows);
       setEquityRows(equityData);
       setPlaybackIndex(Math.max(0, equityData.length - 1));
       setSymbol(universeRows[0]?.symbol ?? '');
@@ -375,36 +489,17 @@ function App() {
           }}
           onPlayingChange={setPlaying}
         />
-        <KlineChart bars={visibleBars} trades={visibleTrades} />
+        <KlineChart bars={visibleBars} trades={visibleTrades} signals={visibleSignals} />
         <AccountOverview currentSnapshot={currentSnapshot} />
-        <div className="grid">
+        <div className="replay-grid">
           <section>
             <h3>账户总资产回放</h3>
             <EquityChart rows={visibleEquity} />
           </section>
-          <section>
-            <h3>当前持仓浮盈亏</h3>
-            <table>
-              <thead>
-                <tr>
-                  <th>名称</th>
-                  <th>持仓份额</th>
-                  <th>浮动盈亏</th>
-                </tr>
-              </thead>
-              <tbody>
-                {positions.map((row) => (
-                  <tr key={row.symbol}>
-                    <td>{row.name}</td>
-                    <td>{row.quantity}</td>
-                    <td>{row.pnl.toFixed(2)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </section>
+          <ReplayPosition selectedName={selectedName} currentBar={currentBar} visibleTrades={visibleTrades} />
         </div>
         <StrategyCheck
+          currentDate={currentDate}
           currentBar={currentBar}
           currentSnapshot={currentSnapshot}
           visibleTrades={visibleTrades}
