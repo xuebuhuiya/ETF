@@ -6,9 +6,12 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pandas as pd
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from src.analysis.benchmark import build_buy_hold_curve
+from src.analysis.regime import build_market_regimes, summarize_by_regime
 from src.config import load_config
 from src.storage.parquet_store import ParquetMarketStore
 
@@ -55,6 +58,34 @@ def _latest_run_id() -> int | None:
         return None if row is None or row["run_id"] is None else int(row["run_id"])
 
 
+def _universe_rows(run_id: int) -> list[dict]:
+    return _rows(
+        """
+        SELECT symbol, name, avg_amount_20d, volatility_20d, rank
+        FROM universe_snapshots
+        WHERE run_id = ?
+        ORDER BY rank
+        """,
+        (run_id,),
+    )
+
+
+def _universe_frame(run_id: int) -> pd.DataFrame:
+    return pd.DataFrame(_universe_rows(run_id))
+
+
+def _bars_for_universe(universe_frame: pd.DataFrame) -> pd.DataFrame:
+    if universe_frame.empty:
+        return pd.DataFrame()
+    store = ParquetMarketStore(cfg.parquet_dir)
+    return store.read_bars(
+        symbols=universe_frame["symbol"].tolist(),
+        interval=cfg.raw["data"]["bar_interval"],
+        start_date=cfg.raw["data"]["start_date"],
+        end_date=cfg.raw["data"]["end_date"],
+    )
+
+
 @app.get("/api/health")
 def health() -> dict:
     return {
@@ -70,15 +101,7 @@ def universe(run_id: int | None = None) -> list[dict]:
     run_id = run_id or _latest_run_id()
     if run_id is None:
         return []
-    return _rows(
-        """
-        SELECT symbol, name, avg_amount_20d, volatility_20d, rank
-        FROM universe_snapshots
-        WHERE run_id = ?
-        ORDER BY rank
-        """,
-        (run_id,),
-    )
+    return _universe_rows(run_id)
 
 
 @app.get("/api/bars")
@@ -189,4 +212,60 @@ def equity(run_id: int | None = None) -> list[dict]:
         ORDER BY date
         """,
         (run_id,),
+    )
+
+
+@app.get("/api/benchmarks/equity")
+def benchmark_equity(run_id: int | None = None) -> list[dict]:
+    run_id = run_id or _latest_run_id()
+    if run_id is None:
+        return []
+    universe_frame = _universe_frame(run_id)
+    bars_frame = _bars_for_universe(universe_frame)
+    if universe_frame.empty or bars_frame.empty:
+        return []
+
+    fair_curve = build_buy_hold_curve(
+        name="buy_hold_max_total_position",
+        config=cfg.raw,
+        initial_cash=cfg.initial_cash,
+        bars=bars_frame,
+        universe=universe_frame,
+        target_position_pct=float(cfg.raw["risk"]["max_total_position_pct"]),
+    )
+    full_curve = build_buy_hold_curve(
+        name="buy_hold_full_position",
+        config=cfg.raw,
+        initial_cash=cfg.initial_cash,
+        bars=bars_frame,
+        universe=universe_frame,
+        target_position_pct=1.0,
+    )
+    return fair_curve + full_curve
+
+
+@app.get("/api/regimes/summary")
+def regime_summary(run_id: int | None = None) -> list[dict]:
+    run_id = run_id or _latest_run_id()
+    if run_id is None:
+        return []
+    universe_frame = _universe_frame(run_id)
+    bars_frame = _bars_for_universe(universe_frame)
+    if universe_frame.empty or bars_frame.empty:
+        return []
+
+    fair_curve = build_buy_hold_curve(
+        name="buy_hold_max_total_position",
+        config=cfg.raw,
+        initial_cash=cfg.initial_cash,
+        bars=bars_frame,
+        universe=universe_frame,
+        target_position_pct=float(cfg.raw["risk"]["max_total_position_pct"]),
+    )
+    regime_rows = build_market_regimes(bars_frame, universe_frame)
+    return summarize_by_regime(
+        equity_rows=equity(run_id),
+        benchmark_rows=fair_curve,
+        trades=trades(run_id=run_id),
+        regime_rows=regime_rows,
     )

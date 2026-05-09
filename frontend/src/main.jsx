@@ -27,6 +27,16 @@ const REJECT_REASON_LABELS = {
   trend_filter: '趋势过滤',
   quantity_not_lot_sized: '份额不足一手',
 };
+const BENCHMARK_LABELS = {
+  buy_hold_max_total_position: '70%仓位买入持有',
+  buy_hold_full_position: '满仓买入持有',
+};
+const REGIME_LABELS = {
+  uptrend: '上涨',
+  range: '震荡',
+  downtrend: '下跌',
+  not_ready: '样本不足',
+};
 
 function formatNumber(value, digits = 2) {
   return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '-';
@@ -136,7 +146,7 @@ function KlineChart({ bars, trades, signals }) {
   return <div id="kline-chart" className="chart" />;
 }
 
-function EquityChart({ rows }) {
+function EquityChart({ rows, benchmarks }) {
   useEffect(() => {
     let chart;
     const element = document.getElementById('equity-chart');
@@ -146,9 +156,18 @@ function EquityChart({ rows }) {
     }
 
     chart = echarts.init(element);
+    const benchmarkVariants = [...new Set(benchmarks.map((row) => row.variant))];
+    const benchmarkByVariant = Object.fromEntries(
+      benchmarkVariants.map((variant) => [
+        variant,
+        Object.fromEntries(benchmarks.filter((row) => row.variant === variant).map((row) => [row.date, row.total_equity])),
+      ]),
+    );
+
     chart.setOption({
+      legend: { top: 0 },
       tooltip: { trigger: 'axis' },
-      grid: { left: 48, right: 24, top: 24, bottom: 36 },
+      grid: { left: 48, right: 24, top: 36, bottom: 36 },
       xAxis: { type: 'category', data: rows.map((row) => row.date) },
       yAxis: { type: 'value', scale: true },
       series: [
@@ -160,15 +179,59 @@ function EquityChart({ rows }) {
           lineStyle: { color: '#2563eb' },
           areaStyle: { color: 'rgba(37, 99, 235, 0.12)' },
         },
+        ...benchmarkVariants.map((variant, index) => ({
+          name: BENCHMARK_LABELS[variant] ?? variant,
+          type: 'line',
+          smooth: true,
+          showSymbol: false,
+          data: rows.map((row) => benchmarkByVariant[variant][row.date] ?? null),
+          lineStyle: {
+            color: index === 0 ? '#f59e0b' : '#64748b',
+            type: index === 0 ? 'solid' : 'dashed',
+            width: 2,
+          },
+        })),
       ],
     });
 
     return () => {
       if (chart) chart.dispose();
     };
-  }, [rows]);
+  }, [rows, benchmarks]);
 
   return <div id="equity-chart" className="chart small" />;
+}
+
+function BenchmarkOverview({ currentSnapshot, currentBenchmarks }) {
+  const fair = currentBenchmarks.find((row) => row.variant === 'buy_hold_max_total_position');
+  const full = currentBenchmarks.find((row) => row.variant === 'buy_hold_full_position');
+  const fairExcess = currentSnapshot && fair ? currentSnapshot.total_return - fair.total_return : null;
+
+  return (
+    <section>
+      <h3>基准对比</h3>
+      <div className="metrics benchmark">
+        <div>
+          <span>策略累计收益</span>
+          <strong>{formatPct(currentSnapshot?.total_return)}</strong>
+        </div>
+        <div>
+          <span>70%仓位买入持有</span>
+          <strong>{formatPct(fair?.total_return)}</strong>
+        </div>
+        <div>
+          <span>满仓买入持有</span>
+          <strong>{formatPct(full?.total_return)}</strong>
+        </div>
+        <div>
+          <span>策略相对70%基准</span>
+          <strong className={fairExcess === null ? '' : fairExcess >= 0 ? 'positive' : 'negative'}>
+            {formatPct(fairExcess)}
+          </strong>
+        </div>
+      </div>
+    </section>
+  );
 }
 
 function PlaybackControls({ dates, index, playing, onIndexChange, onPlayingChange }) {
@@ -382,9 +445,45 @@ function StrategyCheck({ currentDate, currentBar, currentSnapshot, visibleTrades
   );
 }
 
+function RegimeSummary({ rows }) {
+  return (
+    <section>
+      <h3>行情状态分段</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>行情状态</th>
+            <th>天数</th>
+            <th>策略收益</th>
+            <th>70%基准收益</th>
+            <th>超额收益</th>
+            <th>策略回撤</th>
+            <th>成交次数</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.regime}>
+              <td>{REGIME_LABELS[row.regime] ?? row.regime_label}</td>
+              <td>{row.days}</td>
+              <td>{formatPct(row.strategy_return)}</td>
+              <td>{formatPct(row.benchmark_return)}</td>
+              <td className={row.excess_return >= 0 ? 'positive' : 'negative'}>{formatPct(row.excess_return)}</td>
+              <td>{formatPct(row.strategy_max_drawdown)}</td>
+              <td>{row.trade_count}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
 function App() {
   const [universe, setUniverse] = useState([]);
   const [equityRows, setEquityRows] = useState([]);
+  const [benchmarkRows, setBenchmarkRows] = useState([]);
+  const [regimeRows, setRegimeRows] = useState([]);
   const [bars, setBars] = useState([]);
   const [trades, setTrades] = useState([]);
   const [signals, setSignals] = useState([]);
@@ -396,9 +495,13 @@ function App() {
     Promise.all([
       fetchJson('/api/universe'),
       fetchJson('/api/account/equity'),
-    ]).then(([universeRows, equityData]) => {
+      fetchJson('/api/benchmarks/equity'),
+      fetchJson('/api/regimes/summary'),
+    ]).then(([universeRows, equityData, benchmarkData, regimeData]) => {
       setUniverse(universeRows);
       setEquityRows(equityData);
+      setBenchmarkRows(benchmarkData);
+      setRegimeRows(regimeData);
       setPlaybackIndex(Math.max(0, equityData.length - 1));
       setSymbol(universeRows[0]?.symbol ?? '');
     });
@@ -453,8 +556,16 @@ function App() {
     () => equityRows.filter((row) => row.date <= currentDate),
     [equityRows, currentDate],
   );
+  const visibleBenchmarks = useMemo(
+    () => benchmarkRows.filter((row) => row.date <= currentDate),
+    [benchmarkRows, currentDate],
+  );
   const currentBar = visibleBars[visibleBars.length - 1];
   const currentSnapshot = visibleEquity[visibleEquity.length - 1];
+  const currentBenchmarks = useMemo(
+    () => benchmarkRows.filter((row) => row.date === currentDate),
+    [benchmarkRows, currentDate],
+  );
 
   return (
     <main className="shell">
@@ -492,13 +603,15 @@ function App() {
         />
         <KlineChart bars={visibleBars} trades={visibleTrades} signals={visibleSignals} />
         <AccountOverview currentSnapshot={currentSnapshot} />
+        <BenchmarkOverview currentSnapshot={currentSnapshot} currentBenchmarks={currentBenchmarks} />
         <div className="replay-grid">
           <section>
-            <h3>账户总资产回放</h3>
-            <EquityChart rows={visibleEquity} />
+            <h3>策略与基准净值回放</h3>
+            <EquityChart rows={visibleEquity} benchmarks={visibleBenchmarks} />
           </section>
           <ReplayPosition selectedName={selectedName} currentBar={currentBar} visibleTrades={visibleTrades} />
         </div>
+        <RegimeSummary rows={regimeRows} />
         <StrategyCheck
           currentDate={currentDate}
           currentBar={currentBar}

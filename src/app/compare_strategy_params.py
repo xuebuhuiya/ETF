@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.analysis.benchmark import build_buy_hold_curve, summarize_curve
 from src.config import load_config
 from src.storage.parquet_store import ParquetMarketStore
 from src.strategy.grid_t import GridTBacktester
@@ -107,72 +108,28 @@ def _run_buy_hold_variant(
     universe: pd.DataFrame,
     target_position_pct: float,
 ) -> dict:
-    selected_symbols = universe["symbol"].tolist()
-    frame = bars[bars["symbol"].isin(selected_symbols)].sort_values(["datetime", "symbol"])
-    first_bars = frame.sort_values(["symbol", "datetime"]).groupby("symbol", sort=False).first()
-
-    broker_config = config["broker_sim"]
-    lot_size = int(broker_config["lot_size"])
-    fee_rate = float(broker_config["fee_rate"])
-    min_fee = float(broker_config["min_fee"])
-    slippage_pct = float(broker_config["slippage_pct"])
-
-    cash = float(initial_cash)
-    holdings: dict[str, int] = {}
-    buy_budget = initial_cash * target_position_pct / max(len(selected_symbols), 1)
-    trades = 0
-
-    for symbol in selected_symbols:
-        if symbol not in first_bars.index:
-            continue
-        fill_price = float(first_bars.loc[symbol, "open"]) * (1 + slippage_pct)
-        quantity = _quantity_for_budget(buy_budget, fill_price, lot_size, fee_rate, min_fee)
-        amount = fill_price * quantity
-        fee = max(amount * fee_rate, min_fee) if quantity else 0.0
-        if quantity and cash >= amount + fee:
-            holdings[symbol] = quantity
-            cash -= amount + fee
-            trades += 1
-
-    last_prices = {symbol: 0.0 for symbol in selected_symbols}
-    peak_equity = float(initial_cash)
-    max_drawdown = 0.0
-    final_equity = float(initial_cash)
-
-    for _, day_bars in frame.groupby("datetime", sort=True):
-        for row in day_bars.itertuples(index=False):
-            last_prices[row.symbol] = float(row.close)
-        market_value = sum(quantity * last_prices.get(symbol, 0.0) for symbol, quantity in holdings.items())
-        final_equity = cash + market_value
-        peak_equity = max(peak_equity, final_equity)
-        drawdown = 0.0 if peak_equity == 0 else (final_equity / peak_equity) - 1
-        max_drawdown = min(max_drawdown, drawdown)
+    curve = build_buy_hold_curve(
+        name=name,
+        config=config,
+        initial_cash=initial_cash,
+        bars=bars,
+        universe=universe,
+        target_position_pct=target_position_pct,
+    )
+    summary = summarize_curve(curve)
 
     return {
         "variant": name,
         "type": "benchmark",
-        "final_equity": round(final_equity, 2),
-        "total_return": round((final_equity / initial_cash) - 1, 6),
-        "max_drawdown": round(max_drawdown, 6),
-        "trades": trades,
+        "final_equity": summary["final_equity"],
+        "total_return": summary["total_return"],
+        "max_drawdown": summary["max_drawdown"],
+        "trades": summary["trades"],
         "signals": 0,
         "rejected": 0,
         "trend_filter_rejected": 0,
         "target_position_pct": round(target_position_pct, 4),
     }
-
-
-def _quantity_for_budget(budget: float, price: float, lot_size: int, fee_rate: float, min_fee: float) -> int:
-    if price <= 0 or budget <= 0:
-        return 0
-    quantity = int(budget / price / lot_size) * lot_size
-    while quantity > 0:
-        amount = price * quantity
-        fee = max(amount * fee_rate, min_fee)
-        if amount + fee <= budget:
-            return quantity
-        quantity -= lot_size
-    return 0
 
 
 if __name__ == "__main__":
