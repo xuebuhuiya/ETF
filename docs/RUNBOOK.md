@@ -152,6 +152,34 @@ GET http://127.0.0.1:8000/api/regimes/summary
 - 70% 买入持有基准在同一批日期里的复合收益。
 - 策略超额收益、回撤和成交次数。
 
+## 2.5 收益差距归因报告
+
+在已经完成一次回测后，可以运行：
+
+```powershell
+python -m src.app.analyze_attribution
+```
+
+输出文件：
+
+```text
+reports/attribution_report.md
+reports/attribution_summary.csv
+reports/attribution_by_regime.csv
+reports/attribution_by_symbol.csv
+reports/attribution_sell_opportunities.csv
+reports/attribution_rejected_buys.csv
+```
+
+这个报告用于回答：
+
+- 策略和 70% 买入持有基准差多少。
+- 差距主要来自上涨、震荡还是下跌阶段。
+- 策略平均仓位是否明显低于基准。
+- 卖出后继续上涨的逐笔粗估机会成本。
+- 被趋势过滤、仓位上限、冷却期拦截的买入，如果持有到期末的逐笔粗估机会。
+- 交易成本是否足以解释收益差距。
+
 ## 3. 运行基础测试
 
 ```powershell
