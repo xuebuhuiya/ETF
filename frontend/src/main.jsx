@@ -479,6 +479,52 @@ function RegimeSummary({ rows }) {
   );
 }
 
+function OverviewPage({
+  currentSnapshot,
+  currentBenchmarks,
+  visibleEquity,
+  visibleBenchmarks,
+  regimeRows,
+}) {
+  return (
+    <>
+      <AccountOverview currentSnapshot={currentSnapshot} />
+      <BenchmarkOverview currentSnapshot={currentSnapshot} currentBenchmarks={currentBenchmarks} />
+      <section>
+        <h3>策略与基准净值回放</h3>
+        <EquityChart rows={visibleEquity} benchmarks={visibleBenchmarks} />
+      </section>
+      <RegimeSummary rows={regimeRows} />
+    </>
+  );
+}
+
+function EtfDetailPage({
+  selectedName,
+  visibleBars,
+  visibleTrades,
+  visibleSignals,
+  currentDate,
+  currentBar,
+  currentSnapshot,
+}) {
+  return (
+    <>
+      <KlineChart bars={visibleBars} trades={visibleTrades} signals={visibleSignals} />
+      <div className="detail-grid">
+        <ReplayPosition selectedName={selectedName} currentBar={currentBar} visibleTrades={visibleTrades} />
+        <StrategyCheck
+          currentDate={currentDate}
+          currentBar={currentBar}
+          currentSnapshot={currentSnapshot}
+          visibleTrades={visibleTrades}
+          visibleSignals={visibleSignals}
+        />
+      </div>
+    </>
+  );
+}
+
 function App() {
   const [universe, setUniverse] = useState([]);
   const [equityRows, setEquityRows] = useState([]);
@@ -488,6 +534,7 @@ function App() {
   const [trades, setTrades] = useState([]);
   const [signals, setSignals] = useState([]);
   const [symbol, setSymbol] = useState('');
+  const [activeView, setActiveView] = useState('overview');
   const [playbackIndex, setPlaybackIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
 
@@ -566,17 +613,30 @@ function App() {
     () => benchmarkRows.filter((row) => row.date === currentDate),
     [benchmarkRows, currentDate],
   );
+  const pageTitle = activeView === 'overview' ? '账户总览' : selectedName;
 
   return (
     <main className="shell">
       <aside className="sidebar">
         <h1>ETF 模拟盘</h1>
+        <nav className="nav">
+          <button className={activeView === 'overview' ? 'active' : ''} onClick={() => setActiveView('overview')}>
+            总览
+          </button>
+          <button className={activeView === 'detail' ? 'active' : ''} onClick={() => setActiveView('detail')}>
+            ETF详情
+          </button>
+        </nav>
+        <h3 className="sidebar-title">标的</h3>
         <div className="list">
           {universe.map((item) => (
             <button
               className={item.symbol === symbol ? 'active' : ''}
               key={item.symbol}
-              onClick={() => setSymbol(item.symbol)}
+              onClick={() => {
+                setSymbol(item.symbol);
+                setActiveView('detail');
+              }}
             >
               <span>{item.name}</span>
               <strong>{item.symbol}</strong>
@@ -588,7 +648,7 @@ function App() {
         <header>
           <div>
             <p>本地模拟回放</p>
-            <h2>{selectedName}</h2>
+            <h2>{pageTitle}</h2>
           </div>
         </header>
         <PlaybackControls
@@ -601,24 +661,25 @@ function App() {
           }}
           onPlayingChange={setPlaying}
         />
-        <KlineChart bars={visibleBars} trades={visibleTrades} signals={visibleSignals} />
-        <AccountOverview currentSnapshot={currentSnapshot} />
-        <BenchmarkOverview currentSnapshot={currentSnapshot} currentBenchmarks={currentBenchmarks} />
-        <div className="replay-grid">
-          <section>
-            <h3>策略与基准净值回放</h3>
-            <EquityChart rows={visibleEquity} benchmarks={visibleBenchmarks} />
-          </section>
-          <ReplayPosition selectedName={selectedName} currentBar={currentBar} visibleTrades={visibleTrades} />
-        </div>
-        <RegimeSummary rows={regimeRows} />
-        <StrategyCheck
-          currentDate={currentDate}
-          currentBar={currentBar}
-          currentSnapshot={currentSnapshot}
-          visibleTrades={visibleTrades}
-          visibleSignals={visibleSignals}
-        />
+        {activeView === 'overview' ? (
+          <OverviewPage
+            currentSnapshot={currentSnapshot}
+            currentBenchmarks={currentBenchmarks}
+            visibleEquity={visibleEquity}
+            visibleBenchmarks={visibleBenchmarks}
+            regimeRows={regimeRows}
+          />
+        ) : (
+          <EtfDetailPage
+            selectedName={selectedName}
+            visibleBars={visibleBars}
+            visibleTrades={visibleTrades}
+            visibleSignals={visibleSignals}
+            currentDate={currentDate}
+            currentBar={currentBar}
+            currentSnapshot={currentSnapshot}
+          />
+        )}
       </section>
     </main>
   );

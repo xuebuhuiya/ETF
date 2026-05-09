@@ -30,6 +30,35 @@ button {
   font-size: 24px;
 }
 
+.nav {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.nav button {
+  width: 100%;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 10px 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.nav button.active {
+  border-color: #111827;
+  background: #111827;
+  color: #ffffff;
+}
+
+.sidebar-title {
+  margin: 0 0 10px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .list {
   display: grid;
   gap: 8px;
@@ -125,6 +154,14 @@ header h2 {
   grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
   gap: 16px;
   margin-top: 16px;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(0, 2fr);
+  gap: 16px;
+  margin-top: 16px;
+  align-items: start;
 }
 
 .activity-grid {
@@ -244,6 +281,7 @@ td.sell {
   }
 
   .replay-grid,
+  .detail-grid,
   .activity-grid {
     grid-template-columns: 1fr;
   }
