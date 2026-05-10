@@ -11,11 +11,21 @@ data:
   end_date: "2026-05-08"
   adjust: ""
   default_symbols:
+    - "510050"
     - "510300"
     - "510500"
     - "159915"
     - "588000"
     - "518880"
+    - "512880"
+    - "512010"
+    - "159928"
+    - "159995"
+    - "516160"
+    - "512660"
+    - "513100"
+    - "513500"
+    - "513180"
 
 storage:
   market_store: parquet
@@ -91,6 +101,13 @@ experiment:
     max_grid_levels:
       - 3
       - 5
+  walk_forward:
+    enabled: true
+    start_date: "2024-01-01"
+    end_date: "2026-05-08"
+    train_months: 6
+    validation_months: 3
+    step_months: 3
 
 reporting:
   output_dir: reports

@@ -35,12 +35,16 @@ def main() -> None:
 
     rows = pd.DataFrame(result["rows"])
     summary = pd.DataFrame(result["summary"])
+    walk_forward = pd.DataFrame(result["walk_forward"])
     selected = result["selected_variant"]
     print(f"selected_variant: {selected}")
     if not summary.empty:
         print(summary.to_string(index=False))
     else:
         print(rows.to_string(index=False))
+    if not walk_forward.empty:
+        print("walk_forward:")
+        print(walk_forward.to_string(index=False))
     for name, path in paths.items():
         print(f"{name}: {path}")
 

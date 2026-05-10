@@ -8,7 +8,7 @@ import pandas as pd
 
 from src.analysis.benchmark import build_buy_hold_curve, summarize_curve
 from src.app.backtest_window import next_bar_entry_date, prepare_universe_and_bars
-from src.experiment.split import ExperimentSplit, slice_bars
+from src.experiment.split import ExperimentSplit, WalkForwardWindow, slice_bars, walk_forward_windows_from_config
 from src.experiment.variants import strategy_variants
 from src.strategy.grid_t import GridTBacktester
 
@@ -29,6 +29,7 @@ def run_experiment(config: dict, initial_cash: float, bars: pd.DataFrame, splits
     return {
         "rows": rows,
         "summary": build_experiment_summary(rows, selected_variant),
+        "walk_forward": run_walk_forward(config, initial_cash, bars, walk_forward_windows_from_config(config)),
         "selected_variant": selected_variant,
     }
 
@@ -81,8 +82,75 @@ def run_split(config: dict, initial_cash: float, bars: pd.DataFrame, split: Expe
     return rows
 
 
+def run_walk_forward(
+    config: dict,
+    initial_cash: float,
+    bars: pd.DataFrame,
+    windows: list[WalkForwardWindow],
+) -> list[dict]:
+    rows = []
+    for window in windows:
+        train_rows = run_split(config, initial_cash, bars, window.train)
+        selected_variant = select_best_strategy_variant(train_rows)
+        validation_rows = run_split(config, initial_cash, bars, window.validation)
+        benchmark = next(
+            (
+                row
+                for row in validation_rows
+                if row.get("type") == "benchmark" and row.get("variant") == "buy_hold_max_total_position"
+            ),
+            {},
+        )
+        selected_row = next(
+            (row for row in validation_rows if row.get("type") == "strategy" and row.get("variant") == selected_variant),
+            None,
+        )
+        if selected_row is None:
+            rows.append(
+                {
+                    "window": window.window,
+                    "selected_variant": selected_variant,
+                    "train_start": window.train.start_date,
+                    "train_end": window.train.end_date,
+                    "validation_start": window.validation.start_date,
+                    "validation_end": window.validation.end_date,
+                    "error": "Selected variant missing in validation rows.",
+                }
+            )
+            continue
+        benchmark_return = float(benchmark.get("total_return") or 0)
+        rows.append(
+            {
+                "window": window.window,
+                "selected_variant": selected_variant,
+                "train_start": window.train.start_date,
+                "train_end": window.train.end_date,
+                "validation_start": window.validation.start_date,
+                "validation_end": window.validation.end_date,
+                "strategy_total_return": selected_row["total_return"],
+                "benchmark_total_return": benchmark.get("total_return"),
+                "excess_return": round(float(selected_row["total_return"]) - benchmark_return, 6),
+                "strategy_max_drawdown": selected_row["max_drawdown"],
+                "benchmark_max_drawdown": benchmark.get("max_drawdown"),
+                "score": selected_row["score"],
+                "trades": selected_row["trades"],
+                "signals": selected_row["signals"],
+                "rejected": selected_row["rejected"],
+                "symbols": selected_row.get("symbols"),
+            }
+        )
+    return rows
+
+
 def select_best_train_variant(rows: list[dict]) -> str | None:
     strategy_rows = [row for row in rows if row.get("split") == "train" and row.get("type") == "strategy"]
+    if not strategy_rows:
+        return select_best_strategy_variant(rows)
+    return max(strategy_rows, key=lambda row: float(row["score"]))["variant"]
+
+
+def select_best_strategy_variant(rows: list[dict]) -> str | None:
+    strategy_rows = [row for row in rows if row.get("type") == "strategy"]
     if not strategy_rows:
         return None
     return max(strategy_rows, key=lambda row: float(row["score"]))["variant"]
@@ -125,9 +193,13 @@ def write_experiment_reports(output_dir: str | Path, result: dict) -> dict[str, 
     paths = {
         "experiment_comparison_csv": output_path / "experiment_comparison.csv",
         "experiment_summary_csv": output_path / "experiment_summary.csv",
+        "experiment_walk_forward_csv": output_path / "experiment_walk_forward.csv",
     }
     pd.DataFrame(result["rows"]).to_csv(paths["experiment_comparison_csv"], index=False, encoding="utf-8-sig")
     pd.DataFrame(result["summary"]).to_csv(paths["experiment_summary_csv"], index=False, encoding="utf-8-sig")
+    pd.DataFrame(result.get("walk_forward", [])).to_csv(
+        paths["experiment_walk_forward_csv"], index=False, encoding="utf-8-sig"
+    )
     return paths
 
 

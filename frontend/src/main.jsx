@@ -645,11 +645,151 @@ function EtfDetailPage({
   );
 }
 
+function ExperimentPage({ summaryRows, comparisonRows, walkForwardRows }) {
+  const selected = summaryRows[0]?.selected_variant ?? '-';
+  const train = summaryRows.find((row) => row.split === 'train');
+  const validation = summaryRows.find((row) => row.split === 'validation');
+  const test = summaryRows.find((row) => row.split === 'test');
+  const strategyRows = comparisonRows.filter((row) => row.type === 'strategy' && row.split === 'train');
+  const sortedStrategies = [...strategyRows].sort((a, b) => Number(b.score ?? 0) - Number(a.score ?? 0)).slice(0, 8);
+  const avgWalkForward =
+    walkForwardRows.length > 0
+      ? walkForwardRows.reduce((sum, row) => sum + Number(row.excess_return ?? 0), 0) / walkForwardRows.length
+      : null;
+
+  return (
+    <>
+      <section>
+        <h3>实验总览</h3>
+        <div className="metrics experiment">
+          <div>
+            <span>训练期选中策略</span>
+            <strong>{selected}</strong>
+          </div>
+          <div>
+            <span>训练期超额收益</span>
+            <strong className={valueClass(train?.excess_return)}>{formatPct(train?.excess_return)}</strong>
+          </div>
+          <div>
+            <span>验证期超额收益</span>
+            <strong className={valueClass(validation?.excess_return)}>{formatPct(validation?.excess_return)}</strong>
+          </div>
+          <div>
+            <span>测试期超额收益</span>
+            <strong className={valueClass(test?.excess_return)}>{formatPct(test?.excess_return)}</strong>
+          </div>
+          <div>
+            <span>滚动验证轮数</span>
+            <strong>{walkForwardRows.length}</strong>
+          </div>
+          <div>
+            <span>滚动平均超额</span>
+            <strong className={valueClass(avgWalkForward)}>{formatPct(avgWalkForward)}</strong>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h3>训练 / 验证 / 测试</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>区间</th>
+              <th>策略收益</th>
+              <th>70%基准</th>
+              <th>超额收益</th>
+              <th>策略回撤</th>
+              <th>成交</th>
+              <th>拦截</th>
+            </tr>
+          </thead>
+          <tbody>
+            {summaryRows.map((row) => (
+              <tr key={row.split}>
+                <td>{row.split}</td>
+                <td>{formatPct(row.strategy_total_return)}</td>
+                <td>{formatPct(row.benchmark_total_return)}</td>
+                <td className={valueClass(row.excess_return)}>{formatPct(row.excess_return)}</td>
+                <td>{formatPct(row.strategy_max_drawdown)}</td>
+                <td>{row.trades}</td>
+                <td>{row.rejected}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h3>训练期策略排名</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>策略版本</th>
+              <th>收益</th>
+              <th>最大回撤</th>
+              <th>分数</th>
+              <th>成交</th>
+              <th>拦截</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sortedStrategies.map((row) => (
+              <tr key={`${row.split}-${row.variant}`}>
+                <td>{row.variant}</td>
+                <td>{formatPct(row.total_return)}</td>
+                <td>{formatPct(row.max_drawdown)}</td>
+                <td>{formatNumber(row.score, 4)}</td>
+                <td>{row.trades}</td>
+                <td>{row.rejected}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h3>Walk-forward 滚动验证</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>窗口</th>
+              <th>训练期</th>
+              <th>验证期</th>
+              <th>选中策略</th>
+              <th>策略收益</th>
+              <th>70%基准</th>
+              <th>超额收益</th>
+              <th>成交</th>
+            </tr>
+          </thead>
+          <tbody>
+            {walkForwardRows.map((row) => (
+              <tr key={row.window}>
+                <td>{row.window}</td>
+                <td>{row.train_start} ~ {row.train_end}</td>
+                <td>{row.validation_start} ~ {row.validation_end}</td>
+                <td>{row.selected_variant}</td>
+                <td>{formatPct(row.strategy_total_return)}</td>
+                <td>{formatPct(row.benchmark_total_return)}</td>
+                <td className={valueClass(row.excess_return)}>{formatPct(row.excess_return)}</td>
+                <td>{row.trades}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+    </>
+  );
+}
+
 function App() {
   const [universe, setUniverse] = useState([]);
   const [equityRows, setEquityRows] = useState([]);
   const [benchmarkRows, setBenchmarkRows] = useState([]);
   const [regimeRows, setRegimeRows] = useState([]);
+  const [experimentSummary, setExperimentSummary] = useState([]);
+  const [experimentComparison, setExperimentComparison] = useState([]);
+  const [walkForwardRows, setWalkForwardRows] = useState([]);
   const [bars, setBars] = useState([]);
   const [trades, setTrades] = useState([]);
   const [signals, setSignals] = useState([]);
@@ -664,11 +804,17 @@ function App() {
       fetchJson('/api/account/equity'),
       fetchJson('/api/benchmarks/equity'),
       fetchJson('/api/regimes/summary'),
-    ]).then(([universeRows, equityData, benchmarkData, regimeData]) => {
+      fetchJson('/api/experiments/summary'),
+      fetchJson('/api/experiments/comparison'),
+      fetchJson('/api/experiments/walk-forward'),
+    ]).then(([universeRows, equityData, benchmarkData, regimeData, experimentSummaryData, experimentComparisonData, walkForwardData]) => {
       setUniverse(universeRows);
       setEquityRows(equityData);
       setBenchmarkRows(benchmarkData);
       setRegimeRows(regimeData);
+      setExperimentSummary(experimentSummaryData);
+      setExperimentComparison(experimentComparisonData);
+      setWalkForwardRows(walkForwardData);
       setPlaybackIndex(Math.max(0, equityData.length - 1));
       setSymbol(universeRows[0]?.symbol ?? '');
     });
@@ -733,7 +879,7 @@ function App() {
     () => benchmarkRows.filter((row) => dateKeyOf(row.date) === dateKeyOf(currentDate)),
     [benchmarkRows, currentDate],
   );
-  const pageTitle = activeView === 'overview' ? '账户总览' : selectedName;
+  const pageTitle = activeView === 'overview' ? '账户总览' : activeView === 'experiment' ? '实验对比' : selectedName;
 
   return (
     <main className="shell">
@@ -745,6 +891,9 @@ function App() {
           </button>
           <button className={activeView === 'detail' ? 'active' : ''} onClick={() => setActiveView('detail')}>
             ETF详情
+          </button>
+          <button className={activeView === 'experiment' ? 'active' : ''} onClick={() => setActiveView('experiment')}>
+            实验对比
           </button>
         </nav>
         <h3 className="sidebar-title">标的</h3>
@@ -788,6 +937,12 @@ function App() {
             visibleEquity={visibleEquity}
             visibleBenchmarks={visibleBenchmarks}
             regimeRows={regimeRows}
+          />
+        ) : activeView === 'experiment' ? (
+          <ExperimentPage
+            summaryRows={experimentSummary}
+            comparisonRows={experimentComparison}
+            walkForwardRows={walkForwardRows}
           />
         ) : (
           <EtfDetailPage

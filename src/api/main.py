@@ -98,6 +98,14 @@ def _benchmark_entry_date(run_id: int) -> str | None:
     return None
 
 
+def _report_csv(filename: str) -> list[dict]:
+    path = Path(cfg.reporting_dir) / filename
+    if not path.exists():
+        return []
+    frame = pd.read_csv(path)
+    return frame.where(pd.notna(frame), None).to_dict(orient="records")
+
+
 @app.get("/api/health")
 def health() -> dict:
     return {
@@ -284,3 +292,18 @@ def regime_summary(run_id: int | None = None) -> list[dict]:
         trades=trades(run_id=run_id),
         regime_rows=regime_rows,
     )
+
+
+@app.get("/api/experiments/summary")
+def experiment_summary() -> list[dict]:
+    return _report_csv("experiment_summary.csv")
+
+
+@app.get("/api/experiments/comparison")
+def experiment_comparison() -> list[dict]:
+    return _report_csv("experiment_comparison.csv")
+
+
+@app.get("/api/experiments/walk-forward")
+def experiment_walk_forward() -> list[dict]:
+    return _report_csv("experiment_walk_forward.csv")

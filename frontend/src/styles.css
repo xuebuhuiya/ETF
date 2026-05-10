@@ -203,6 +203,10 @@ h3 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.metrics.experiment {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
 .metrics div {
   border: 1px solid #e5e7eb;
   border-radius: 6px;
@@ -313,6 +317,10 @@ td.sell {
   }
 
   .metrics.scenario {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .metrics.experiment {
     grid-template-columns: 1fr 1fr;
   }
 }

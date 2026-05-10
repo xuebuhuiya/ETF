@@ -29,14 +29,24 @@ python -m src.app.run_backtest --sample --periods 120
 python -m src.app.run_backtest --provider akshare
 ```
 
-默认会拉取配置里的 5 只 ETF：
+默认会拉取配置里的扩展 ETF 池：
 
 ```text
+510050 上证50ETF
 510300 沪深300ETF
 510500 中证500ETF
 159915 创业板ETF
 588000 科创50ETF
 518880 黄金ETF
+512880 证券ETF
+512010 医药ETF
+159928 消费ETF
+159995 芯片ETF
+516160 新能源ETF
+512660 军工ETF
+513100 纳指ETF
+513500 标普500ETF
+513180 恒生科技ETF
 ```
 
 也可以指定少量 ETF：
@@ -155,9 +165,33 @@ experiment:
 ```text
 reports/experiment_comparison.csv
 reports/experiment_summary.csv
+reports/experiment_walk_forward.csv
 ```
 
-其中 `experiment_summary.csv` 只展示训练期选中策略在各区间的表现，`experiment_comparison.csv` 展示所有策略版本和买入持有基准。
+其中 `experiment_summary.csv` 只展示训练期选中策略在各区间的表现，`experiment_comparison.csv` 展示所有策略版本和买入持有基准，`experiment_walk_forward.csv` 展示滚动训练 / 验证窗口的样本外结果。
+
+如果配置启用了 `experiment.walk_forward`，同一个命令还会执行 walk-forward：
+
+```yaml
+experiment:
+  walk_forward:
+    enabled: true
+    start_date: "2024-01-01"
+    end_date: "2026-05-08"
+    train_months: 6
+    validation_months: 3
+    step_months: 3
+```
+
+默认含义是：每轮使用 6 个月训练，随后 3 个月验证，再向后滚动 3 个月。这个结果比单次训练 / 验证 / 测试更接近真实“未来样本外”检查。
+
+实验结果也会通过 API 提供给前端：
+
+```text
+GET http://127.0.0.1:8000/api/experiments/summary
+GET http://127.0.0.1:8000/api/experiments/comparison
+GET http://127.0.0.1:8000/api/experiments/walk-forward
+```
 
 同样的买入持有基准也会通过 API 提供给前端净值图：
 

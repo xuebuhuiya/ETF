@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from src.experiment.runner import run_experiment
-from src.experiment.split import ExperimentSplit, slice_bars, splits_from_config
+from src.experiment.split import ExperimentSplit, slice_bars, splits_from_config, walk_forward_windows_from_config
 from src.experiment.variants import strategy_variants
 
 
@@ -50,6 +50,14 @@ def _config() -> dict:
             "test": {"start_date": "2024-04-02", "end_date": "2024-05-20"},
             "drawdown_penalty": 0.5,
             "parameter_grid": {"grid_pct": [0.03, 0.05]},
+            "walk_forward": {
+                "enabled": True,
+                "start_date": "2024-01-01",
+                "end_date": "2024-05-20",
+                "train_months": 1,
+                "validation_months": 1,
+                "step_months": 1,
+            },
         },
     }
 
@@ -84,6 +92,15 @@ def test_splits_from_config_and_slice_bars() -> None:
     assert sliced["datetime"].max() <= "2024-02-15"
 
 
+def test_walk_forward_windows_from_config() -> None:
+    windows = walk_forward_windows_from_config(_config())
+
+    assert len(windows) >= 2
+    assert windows[0].window == "wf_01"
+    assert windows[0].train.start_date == "2024-01-01"
+    assert windows[0].validation.start_date == "2024-02-01"
+
+
 def test_strategy_variants_include_built_ins_and_parameter_grid() -> None:
     names = [name for name, _ in strategy_variants(_config())]
 
@@ -97,6 +114,7 @@ def test_run_experiment_selects_train_variant_and_reports_all_splits() -> None:
     result = run_experiment(_config(), 50_000, _bars(), splits)
 
     assert result["selected_variant"]
+    assert result["walk_forward"]
     assert {row["split"] for row in result["rows"]} == {"train", "validation"}
     assert {row["type"] for row in result["rows"]} >= {"strategy", "benchmark"}
     assert [row["split"] for row in result["summary"]] == ["train", "validation"]
