@@ -20,6 +20,7 @@ class GridTBacktester:
         self.reference_prices: dict[str, float] = {}
         self.pending_by_symbol: dict[str, dict] = {}
         self.grid_levels: dict[str, int] = {}
+        self.grid_lots: dict[str, list[dict]] = {}
         self.last_buy_day_index: dict[str, int] = {}
         self.current_day_index = 0
 
@@ -54,10 +55,11 @@ class GridTBacktester:
         if signal["status"] != "filled":
             return
         if pending["side"] == "buy" and pending["reason"] != "initialize_base_position":
-            self.grid_levels[symbol] = self.grid_levels.get(symbol, 0) + 1
+            trade = self.account.trades[-1] if self.account.trades else {}
+            self._add_grid_lot(symbol, int(trade.get("quantity", pending["quantity"])), float(trade.get("price", open_price)))
             self.last_buy_day_index[symbol] = self.current_day_index
         elif pending["side"] == "sell":
-            self.grid_levels[symbol] = max(0, self.grid_levels.get(symbol, 0) - 1)
+            self._consume_grid_lots(symbol, int(pending["quantity"]), float(pending["signal_price"]))
 
     def _maybe_initialize_base(
         self,
@@ -211,13 +213,13 @@ class GridTBacktester:
             return
 
         sellable_t = max(0, position.quantity - position.base_quantity)
+        eligible_grid_quantity, sell_threshold = self._eligible_grid_sell(symbol, price, take_profit_pct)
         if (
             self.strategy_config.get("allow_sell", True)
             and sellable_t > 0
-            and price >= position.avg_cost * (1 + take_profit_pct)
+            and eligible_grid_quantity > 0
         ):
-            sell_threshold = position.avg_cost * (1 + take_profit_pct)
-            planned_quantity = min(quantity, sellable_t)
+            planned_quantity = min(quantity, sellable_t, eligible_grid_quantity)
             audit = self._audit_context(symbol, price, trend_context)
             audit.update(
                 {
@@ -225,7 +227,10 @@ class GridTBacktester:
                     "avg_cost": round(position.avg_cost, 4),
                     "take_profit_pct": take_profit_pct,
                     "sell_threshold": round(sell_threshold, 4),
+                    "sell_threshold_basis": "grid_lot_entry_price",
                     "sellable_t_quantity": sellable_t,
+                    "eligible_grid_quantity": eligible_grid_quantity,
+                    "grid_lot_count": len(self.grid_lots.get(symbol, [])),
                     "trade_amount": trade_amount,
                     "planned_quantity": planned_quantity,
                     "current_grid_level": self.grid_levels.get(symbol, 0),
@@ -241,7 +246,7 @@ class GridTBacktester:
                 price=price,
                 quantity=planned_quantity,
                 strategy=self.strategy_name,
-                reason=f"grid_sell price >= avg_cost*(1+{take_profit_pct})",
+                reason=f"grid_sell price >= grid_lot_entry*(1+{take_profit_pct})",
                 audit=audit,
             )
             self.reference_prices[symbol] = price
@@ -259,6 +264,45 @@ class GridTBacktester:
         if last_day is None:
             return None
         return self.current_day_index - last_day
+
+    def _add_grid_lot(self, symbol: str, quantity: int, fill_price: float) -> None:
+        if quantity <= 0:
+            return
+        self.grid_lots.setdefault(symbol, []).append({"quantity": quantity, "entry_price": fill_price})
+        self.grid_levels[symbol] = len([lot for lot in self.grid_lots[symbol] if int(lot["quantity"]) > 0])
+
+    def _eligible_grid_sell(self, symbol: str, price: float, take_profit_pct: float) -> tuple[int, float]:
+        lots = self.grid_lots.get(symbol, [])
+        eligible = [
+            lot
+            for lot in lots
+            if int(lot["quantity"]) > 0 and price >= float(lot["entry_price"]) * (1 + take_profit_pct)
+        ]
+        if not eligible:
+            next_thresholds = [
+                float(lot["entry_price"]) * (1 + take_profit_pct)
+                for lot in lots
+                if int(lot["quantity"]) > 0
+            ]
+            return 0, min(next_thresholds) if next_thresholds else 0.0
+        threshold = min(float(lot["entry_price"]) * (1 + take_profit_pct) for lot in eligible)
+        return sum(int(lot["quantity"]) for lot in eligible), threshold
+
+    def _consume_grid_lots(self, symbol: str, quantity: int, signal_price: float) -> None:
+        take_profit_pct = float(self.strategy_config["take_profit_pct"])
+        remaining = quantity
+        updated_lots: list[dict] = []
+        for lot in self.grid_lots.get(symbol, []):
+            lot_quantity = int(lot["quantity"])
+            entry_price = float(lot["entry_price"])
+            if remaining > 0 and signal_price >= entry_price * (1 + take_profit_pct):
+                sold = min(lot_quantity, remaining)
+                lot_quantity -= sold
+                remaining -= sold
+            if lot_quantity > 0:
+                updated_lots.append({"quantity": lot_quantity, "entry_price": entry_price})
+        self.grid_lots[symbol] = updated_lots
+        self.grid_levels[symbol] = len(updated_lots)
 
     def _with_trend_columns(self, frame: pd.DataFrame) -> pd.DataFrame:
         trend_config = self.strategy_config.get("trend_filter", {})
@@ -331,6 +375,7 @@ class GridTBacktester:
             "max_symbol_position_pct": float(self.risk_config["max_symbol_position_pct"]),
             "min_cash_pct": float(self.risk_config["min_cash_pct"]),
             "current_grid_level": self.grid_levels.get(symbol, 0),
+            "grid_lot_count": len(self.grid_lots.get(symbol, [])),
             "max_grid_levels": int(self.strategy_config.get("max_grid_levels", 0)),
             "buy_cooldown_days": int(self.strategy_config.get("buy_cooldown_days", 0)),
             "days_since_last_buy": self._days_since_last_buy(symbol),

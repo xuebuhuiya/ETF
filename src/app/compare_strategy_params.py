@@ -9,10 +9,10 @@ from pathlib import Path
 import pandas as pd
 
 from src.analysis.benchmark import build_buy_hold_curve, summarize_curve
+from src.app.backtest_window import next_bar_entry_date, prepare_universe_and_bars
 from src.config import load_config
 from src.storage.parquet_store import ParquetMarketStore
 from src.strategy.grid_t import GridTBacktester
-from src.universe.filter import select_universe
 
 
 def main() -> None:
@@ -28,29 +28,39 @@ def main() -> None:
         start_date=cfg.raw["data"]["start_date"],
         end_date=cfg.raw["data"]["end_date"],
     )
-    universe = select_universe(bars, cfg.raw["universe"])
+    universe, trading_bars, universe_as_of_date = prepare_universe_and_bars(bars, cfg.raw["universe"])
     if universe.empty:
         raise RuntimeError("No ETF candidates selected. Run a backtest and check universe thresholds.")
+    if trading_bars.empty:
+        raise RuntimeError("No trading bars remain after universe selection warmup.")
+    benchmark_entry_date = next_bar_entry_date(trading_bars)
 
     rows = [
         _run_buy_hold_variant(
             "buy_hold_max_total_position",
             cfg.raw,
             cfg.initial_cash,
-            bars,
+            trading_bars,
             universe,
             target_position_pct=float(cfg.raw["risk"]["max_total_position_pct"]),
+            entry_date=benchmark_entry_date,
+            universe_as_of_date=universe_as_of_date,
         ),
         _run_buy_hold_variant(
             "buy_hold_full_position",
             cfg.raw,
             cfg.initial_cash,
-            bars,
+            trading_bars,
             universe,
             target_position_pct=1.0,
+            entry_date=benchmark_entry_date,
+            universe_as_of_date=universe_as_of_date,
         ),
     ]
-    rows.extend(_run_strategy_variant(name, variant, cfg.initial_cash, bars, universe) for name, variant in _variants(cfg.raw))
+    rows.extend(
+        _run_strategy_variant(name, variant, cfg.initial_cash, trading_bars, universe, universe_as_of_date)
+        for name, variant in _variants(cfg.raw)
+    )
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(rows).to_csv(output_path, index=False, encoding="utf-8-sig")
@@ -82,7 +92,14 @@ def _variants(base_config: dict) -> list[tuple[str, dict]]:
     ]
 
 
-def _run_strategy_variant(name: str, config: dict, initial_cash: float, bars: pd.DataFrame, universe: pd.DataFrame) -> dict:
+def _run_strategy_variant(
+    name: str,
+    config: dict,
+    initial_cash: float,
+    bars: pd.DataFrame,
+    universe: pd.DataFrame,
+    universe_as_of_date: str,
+) -> dict:
     account = GridTBacktester(config, initial_cash).run(run_id=0, bars=bars, universe=universe)
     final_snapshot = account.snapshots[-1]
     rejected = [signal for signal in account.signals if signal["status"] == "rejected"]
@@ -97,6 +114,7 @@ def _run_strategy_variant(name: str, config: dict, initial_cash: float, bars: pd
         "signals": len(account.signals),
         "rejected": len(rejected),
         "trend_filter_rejected": len(trend_rejected),
+        "universe_as_of_date": universe_as_of_date,
     }
 
 
@@ -107,6 +125,8 @@ def _run_buy_hold_variant(
     bars: pd.DataFrame,
     universe: pd.DataFrame,
     target_position_pct: float,
+    entry_date: str | None,
+    universe_as_of_date: str,
 ) -> dict:
     curve = build_buy_hold_curve(
         name=name,
@@ -115,6 +135,7 @@ def _run_buy_hold_variant(
         bars=bars,
         universe=universe,
         target_position_pct=target_position_pct,
+        entry_date=entry_date,
     )
     summary = summarize_curve(curve)
 
@@ -129,6 +150,8 @@ def _run_buy_hold_variant(
         "rejected": 0,
         "trend_filter_rejected": 0,
         "target_position_pct": round(target_position_pct, 4),
+        "entry_date": entry_date,
+        "universe_as_of_date": universe_as_of_date,
     }
 
 

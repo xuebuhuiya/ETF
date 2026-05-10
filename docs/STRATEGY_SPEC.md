@@ -21,12 +21,15 @@
 
 ```yaml
 universe:
+  selection_lookback_days: 20
   max_candidates: 10
   min_price: 0.5
   min_avg_amount_20d: 50000000
   min_volatility_20d: 0.008
   max_volatility_20d: 0.04
 ```
+
+回测时只用初始观察窗口筛选 ETF，默认用前 20 个交易日形成标的池，之后才开始产生交易信号。这样可以避免用 2026 年的数据反过来决定 2024 年买什么。
 
 ## 网格做T规则
 
@@ -66,7 +69,7 @@ strategy:
 卖出触发：
 
 ```text
-当前价 >= 最近买入价 * (1 + take_profit_pct)
+当前价 >= 对应网格加仓批次成本 * (1 + take_profit_pct)
 可卖份额充足
 卖出后仍保留底仓
 当天卖出次数未超过限制
@@ -120,6 +123,8 @@ risk:
 买入占用现金 = 成交金额 + 手续费
 卖出增加现金 = 成交金额 - 手续费
 ```
+
+风控检查使用包含滑点后的预计成交价，而不是原始信号价或开盘价。
 
 注意：
 

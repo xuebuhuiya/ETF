@@ -74,16 +74,28 @@ def _universe_frame(run_id: int) -> pd.DataFrame:
     return pd.DataFrame(_universe_rows(run_id))
 
 
-def _bars_for_universe(universe_frame: pd.DataFrame) -> pd.DataFrame:
+def _bars_for_universe(universe_frame: pd.DataFrame, run_id: int | None = None) -> pd.DataFrame:
     if universe_frame.empty:
         return pd.DataFrame()
+    start_date = cfg.raw["data"]["start_date"]
+    if run_id is not None:
+        rows = _rows("SELECT MIN(date) AS start_date FROM account_snapshots WHERE run_id = ?", (run_id,))
+        if rows and rows[0].get("start_date"):
+            start_date = str(rows[0]["start_date"])[:10]
     store = ParquetMarketStore(cfg.parquet_dir)
     return store.read_bars(
         symbols=universe_frame["symbol"].tolist(),
         interval=cfg.raw["data"]["bar_interval"],
-        start_date=cfg.raw["data"]["start_date"],
+        start_date=start_date,
         end_date=cfg.raw["data"]["end_date"],
     )
+
+
+def _benchmark_entry_date(run_id: int) -> str | None:
+    rows = _rows("SELECT MIN(datetime) AS entry_date FROM trades WHERE run_id = ? AND side = 'buy'", (run_id,))
+    if rows and rows[0].get("entry_date"):
+        return str(rows[0]["entry_date"])[:10]
+    return None
 
 
 @app.get("/api/health")
@@ -221,7 +233,7 @@ def benchmark_equity(run_id: int | None = None) -> list[dict]:
     if run_id is None:
         return []
     universe_frame = _universe_frame(run_id)
-    bars_frame = _bars_for_universe(universe_frame)
+    bars_frame = _bars_for_universe(universe_frame, run_id)
     if universe_frame.empty or bars_frame.empty:
         return []
 
@@ -232,6 +244,7 @@ def benchmark_equity(run_id: int | None = None) -> list[dict]:
         bars=bars_frame,
         universe=universe_frame,
         target_position_pct=float(cfg.raw["risk"]["max_total_position_pct"]),
+        entry_date=_benchmark_entry_date(run_id),
     )
     full_curve = build_buy_hold_curve(
         name="buy_hold_full_position",
@@ -240,6 +253,7 @@ def benchmark_equity(run_id: int | None = None) -> list[dict]:
         bars=bars_frame,
         universe=universe_frame,
         target_position_pct=1.0,
+        entry_date=_benchmark_entry_date(run_id),
     )
     return fair_curve + full_curve
 
@@ -250,7 +264,7 @@ def regime_summary(run_id: int | None = None) -> list[dict]:
     if run_id is None:
         return []
     universe_frame = _universe_frame(run_id)
-    bars_frame = _bars_for_universe(universe_frame)
+    bars_frame = _bars_for_universe(universe_frame, run_id)
     if universe_frame.empty or bars_frame.empty:
         return []
 
@@ -261,6 +275,7 @@ def regime_summary(run_id: int | None = None) -> list[dict]:
         bars=bars_frame,
         universe=universe_frame,
         target_position_pct=float(cfg.raw["risk"]["max_total_position_pct"]),
+        entry_date=_benchmark_entry_date(run_id),
     )
     regime_rows = build_market_regimes(bars_frame, universe_frame)
     return summarize_by_regime(

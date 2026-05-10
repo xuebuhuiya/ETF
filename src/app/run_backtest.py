@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime
 
+from src.app.backtest_window import prepare_universe_and_bars
 from src.config import load_config
 from src.data.akshare_data import fetch_etf_daily_bars, parse_symbol_list
 from src.data.sample_data import generate_sample_bars
@@ -13,7 +14,6 @@ from src.reporting.csv_report import write_reports
 from src.storage.parquet_store import ParquetMarketStore
 from src.storage.sqlite_store import SQLiteStore
 from src.strategy.grid_t import GridTBacktester
-from src.universe.filter import select_universe
 
 
 def main() -> None:
@@ -63,26 +63,27 @@ def main() -> None:
         start_date=cfg.raw["data"]["start_date"],
         end_date=cfg.raw["data"]["end_date"],
     )
-    universe = select_universe(bars, cfg.raw["universe"])
+    universe, trading_bars, universe_as_of_date = prepare_universe_and_bars(bars, cfg.raw["universe"])
     if universe.empty:
         raise RuntimeError("No ETF candidates selected. Check data or universe thresholds.")
+    if trading_bars.empty:
+        raise RuntimeError("No trading bars remain after universe selection warmup.")
 
     started_at = datetime.now().isoformat(timespec="seconds")
     run_id = state_store.create_run(
         started_at=started_at,
         strategy_name=cfg.raw["strategy"]["name"],
         initial_cash=cfg.initial_cash,
-        notes=f"{provider} data",
+        notes=f"{provider} data; universe_as_of={universe_as_of_date}",
     )
 
     backtester = GridTBacktester(cfg.raw, cfg.initial_cash)
-    account = backtester.run(run_id=run_id, bars=bars, universe=universe)
+    account = backtester.run(run_id=run_id, bars=trading_bars, universe=universe)
 
-    as_of_date = str(bars["datetime"].max())[:10]
     universe_rows = [
         {
             "run_id": run_id,
-            "date": as_of_date,
+            "date": universe_as_of_date,
             "symbol": row.symbol,
             "name": row.name,
             "avg_amount_20d": round(float(row.avg_amount_20d), 2),
@@ -114,6 +115,8 @@ def main() -> None:
     final_snapshot = account.snapshots[-1]
     print(f"run_id: {run_id}")
     print(f"bars: {len(bars)}")
+    print(f"trading_bars: {len(trading_bars)}")
+    print(f"universe_as_of: {universe_as_of_date}")
     print(f"universe: {len(universe)}")
     print(f"signals: {len(account.signals)}")
     print(f"trades: {len(account.trades)}")

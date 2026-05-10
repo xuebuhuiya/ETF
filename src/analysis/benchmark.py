@@ -13,12 +13,16 @@ def build_buy_hold_curve(
     bars: pd.DataFrame,
     universe: pd.DataFrame,
     target_position_pct: float,
+    entry_date: str | None = None,
 ) -> list[dict]:
     """Build a daily equal-weight buy-and-hold equity curve."""
 
     selected_symbols = universe["symbol"].tolist()
     frame = bars[bars["symbol"].isin(selected_symbols)].sort_values(["datetime", "symbol"])
-    first_bars = frame.sort_values(["symbol", "datetime"]).groupby("symbol", sort=False).first()
+    entry_frame = frame
+    if entry_date:
+        entry_frame = frame[pd.to_datetime(frame["datetime"]) >= pd.to_datetime(entry_date)]
+    first_bars = entry_frame.sort_values(["symbol", "datetime"]).groupby("symbol", sort=False).first()
 
     broker_config = config["broker_sim"]
     lot_size = int(broker_config["lot_size"])
@@ -31,23 +35,35 @@ def build_buy_hold_curve(
     buy_budget = initial_cash * target_position_pct / max(len(selected_symbols), 1)
     trades = 0
 
-    for symbol in selected_symbols:
-        if symbol not in first_bars.index:
-            continue
-        fill_price = float(first_bars.loc[symbol, "open"]) * (1 + slippage_pct)
-        quantity = quantity_for_budget(buy_budget, fill_price, lot_size, fee_rate, min_fee)
-        amount = fill_price * quantity
-        fee = max(amount * fee_rate, min_fee) if quantity else 0.0
-        if quantity and cash >= amount + fee:
-            holdings[symbol] = quantity
-            cash -= amount + fee
-            trades += 1
+    has_entered = False
+
+    def enter_positions() -> None:
+        nonlocal cash, trades, has_entered
+        if has_entered:
+            return
+        for symbol in selected_symbols:
+            if symbol not in first_bars.index:
+                continue
+            fill_price = float(first_bars.loc[symbol, "open"]) * (1 + slippage_pct)
+            quantity = quantity_for_budget(buy_budget, fill_price, lot_size, fee_rate, min_fee)
+            amount = fill_price * quantity
+            fee = max(amount * fee_rate, min_fee) if quantity else 0.0
+            if quantity and cash >= amount + fee:
+                holdings[symbol] = quantity
+                cash -= amount + fee
+                trades += 1
+        has_entered = True
+
+    if entry_date is None:
+        enter_positions()
 
     rows: list[dict] = []
     last_prices = {symbol: 0.0 for symbol in selected_symbols}
     peak_equity = float(initial_cash)
 
     for dt, day_bars in frame.groupby("datetime", sort=True):
+        if entry_date and pd.to_datetime(dt) >= pd.to_datetime(entry_date):
+            enter_positions()
         for row in day_bars.itertuples(index=False):
             last_prices[row.symbol] = float(row.close)
         market_value = sum(quantity * last_prices.get(symbol, 0.0) for symbol, quantity in holdings.items())

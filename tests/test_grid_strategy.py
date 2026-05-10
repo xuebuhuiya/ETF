@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from src.broker_sim.account import SimAccount
 from src.strategy.grid_t import GridTBacktester
 
 
@@ -139,3 +140,39 @@ def test_trend_filter_records_rejected_grid_buy() -> None:
     assert [signal["reject_reason"] for signal in rejected] == ["trend_filter"]
     assert '"trend_filter_reason": "downtrend_below_ma_long"' in rejected[0]["audit_json"]
     assert len(account.trades) == 1
+
+
+def test_risk_checks_use_slippage_adjusted_fill_price() -> None:
+    config = _config()
+    config["broker_sim"]["slippage_pct"] = 0.1
+    account = SimAccount(1_000, config["broker_sim"], config["risk"])
+    pending = account.submit_signal(
+        run_id=1,
+        dt="2024-01-01",
+        symbol="510300",
+        name="沪深300ETF",
+        side="buy",
+        price=10,
+        quantity=100,
+        strategy="test",
+        reason="test",
+    )
+
+    account.execute_pending_signal(pending, execution_dt="2024-01-02", execution_price=10)
+
+    assert account.signals[0]["status"] == "rejected"
+    assert account.signals[0]["reject_reason"] == "insufficient_cash"
+    assert account.trades == []
+
+
+def test_grid_sell_uses_grid_lot_entry_price_not_average_cost() -> None:
+    account = GridTBacktester(_config(), initial_cash=100_000).run(
+        run_id=1,
+        bars=_bars(closes=[10, 9, 9.5, 9.5], opens=[10, 10, 9, 9.5]),
+        universe=_universe(),
+    )
+
+    sells = [trade for trade in account.trades if trade["side"] == "sell"]
+    assert len(sells) == 1
+    assert sells[0]["signal_datetime"] == "2024-01-03"
+    assert sells[0]["datetime"] == "2024-01-04"

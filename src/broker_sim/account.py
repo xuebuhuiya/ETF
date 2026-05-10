@@ -211,8 +211,9 @@ class SimAccount:
         side = pending["side"]
         quantity = self.round_lot(int(pending["quantity"]))
         price = float(execution_price)
+        fill_price = self._fill_price(side, price)
 
-        reject_reason = self._risk_reject_reason(execution_dt, symbol, side, price, quantity)
+        reject_reason = self._risk_reject_reason(execution_dt, symbol, side, fill_price, quantity)
         status = "rejected" if reject_reason else "filled"
 
         signal = self.signals[int(pending["signal_index"])]
@@ -223,6 +224,7 @@ class SimAccount:
             {
                 "execution_datetime": execution_dt,
                 "execution_price": round(price, 4),
+                "estimated_fill_price": round(fill_price, 4),
                 "execution_status": status,
                 "reject_reason": reject_reason,
                 "cash_before_execution": round(self.cash, 2),
@@ -234,8 +236,6 @@ class SimAccount:
             signal["audit_json"] = _to_json(audit_payload)
             return
 
-        slip_pct = float(self.broker_config["slippage_pct"])
-        fill_price = price * (1 + slip_pct if side == "buy" else 1 - slip_pct)
         amount = fill_price * quantity
         fee = max(amount * float(self.broker_config["fee_rate"]), float(self.broker_config["min_fee"]))
         slippage = abs(fill_price - price) * quantity
@@ -374,6 +374,12 @@ class SimAccount:
                     return "base_position_protected"
 
         return None
+
+    def _fill_price(self, side: str, execution_price: float) -> float:
+        slip_pct = float(self.broker_config["slippage_pct"])
+        if side == "buy":
+            return float(execution_price) * (1 + slip_pct)
+        return float(execution_price) * (1 - slip_pct)
 
 
 def _to_json(value: dict) -> str:

@@ -17,7 +17,7 @@ python -m src.app.run_backtest --sample --periods 120
 - 生成本地样例 ETF 日线。
 - 写入 `data/parquet/bars_1d.parquet`。
 - 用 DuckDB 读取 Parquet。
-- 按配置筛选 ETF。
+- 先用配置里的 `universe.selection_lookback_days` 做初始筛选，之后才开始交易，避免用未来数据选 ETF。
 - 运行网格做T模拟。
 - 写入 `data/local.db`。
 - 输出 `reports/signals.csv`、`reports/trades.csv`、`reports/positions.csv`、`reports/daily_summary.csv`、`reports/universe.csv`。
@@ -51,6 +51,7 @@ AkShare 数据源说明：
 - 如果东方财富接口因为网络或代理失败，会自动 fallback 到新浪 ETF 日线接口。
 - 当前标准化字段仍然是 `symbol, name, datetime, open, high, low, close, volume, amount, source, adjust`。
 - `source` 字段会记录实际来源，例如 `akshare_em` 或 `akshare_sina`。
+- 回测不会用完整历史区间筛选 ETF；默认先看前 20 个交易日形成标的池，再从下一交易日开始交易。
 
 ## 2.2 查看策略审计报告
 
@@ -65,7 +66,7 @@ reports/audit_report.md
 
 - 信号日和实际成交日是否错开。
 - 买入信号是否满足 `price <= reference_price * (1 - grid_pct)`。
-- 卖出信号是否满足 `price >= avg_cost * (1 + take_profit_pct)`。
+- 卖出信号是否满足 `price >= grid_lot_entry * (1 + take_profit_pct)`。
 - 信号产生时的现金、持仓、均价、底仓是否合理。
 - 次日开盘成交价、滑点、手续费是否被记录。
 - 风控拦截原因，例如 `max_symbol_position_pct`、`max_total_position_pct`。
@@ -101,8 +102,8 @@ python -m src.app.compare_strategy_params
 
 它会对比：
 
-- `buy_hold_max_total_position`：第一天按 ETF 等权买入，目标仓位为配置里的 `risk.max_total_position_pct`，之后不操作。
-- `buy_hold_full_position`：第一天按 ETF 等权尽量满仓买入，之后不操作。
+- `buy_hold_max_total_position`：按策略可实际成交的次日开盘等权买入，目标仓位为配置里的 `risk.max_total_position_pct`，之后不操作。
+- `buy_hold_full_position`：按策略可实际成交的次日开盘等权尽量满仓买入，之后不操作。
 - 关闭趋势过滤。
 - 当前确认下跌趋势过滤。
 - 严格低于长均线过滤。
