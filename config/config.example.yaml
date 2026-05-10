@@ -70,6 +70,28 @@ risk:
   pause_after_consecutive_losses: 3
   protect_base_position: true
 
+experiment:
+  train:
+    start_date: "2024-01-01"
+    end_date: "2024-12-31"
+  validation:
+    start_date: "2025-01-01"
+    end_date: "2025-12-31"
+  test:
+    start_date: "2026-01-01"
+    end_date: "2026-05-08"
+  drawdown_penalty: 0.5
+  parameter_grid:
+    grid_pct:
+      - 0.006
+      - 0.01
+    take_profit_pct:
+      - 0.006
+      - 0.01
+    max_grid_levels:
+      - 3
+      - 5
+
 reporting:
   output_dir: reports
   write_trades_csv: true

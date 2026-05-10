@@ -120,6 +120,45 @@ python -m src.app.compare_strategy_params
 reports/strategy_comparison.csv
 ```
 
+## 2.4 训练/验证/测试实验
+
+当需要避免“在同一段历史里调参又评价”的问题时，运行：
+
+```powershell
+python -m src.app.run_experiment
+```
+
+它会读取配置里的三段时间：
+
+```yaml
+experiment:
+  train:
+    start_date: "2024-01-01"
+    end_date: "2024-12-31"
+  validation:
+    start_date: "2025-01-01"
+    end_date: "2025-12-31"
+  test:
+    start_date: "2026-01-01"
+    end_date: "2026-05-08"
+```
+
+实验流程：
+
+- 训练期：跑内置策略版本和 `experiment.parameter_grid` 参数组合，按 `收益 - 回撤惩罚` 选出一个训练期最优版本。
+- 验证期：固定训练期选出的版本，不再重新调参，观察是否还能有效。
+- 测试期：作为最后留出区间，用来减少过拟合错觉。
+- 每个区间都会重新用初始观察窗口筛选 ETF，避免使用该区间后半段信息。
+
+输出文件：
+
+```text
+reports/experiment_comparison.csv
+reports/experiment_summary.csv
+```
+
+其中 `experiment_summary.csv` 只展示训练期选中策略在各区间的表现，`experiment_comparison.csv` 展示所有策略版本和买入持有基准。
+
 同样的买入持有基准也会通过 API 提供给前端净值图：
 
 ```text
