@@ -1,146 +1,227 @@
-﻿# ETF T+0 Simulation Lab
+# ETF T+0 Simulation Lab
 
-本项目用于构建一个本地 ETF 做T模拟系统：自动筛选 ETF，使用假设本金运行规则化策略，只记录虚拟交易、持仓、收益和风险指标，并通过本地数据库和前端看板展示 K 线、信号、交易和账户状态。不连接真实券商账户，不自动实盘下单。
+这是一个本地 ETF 做 T / 网格策略模拟系统。项目用于研究规则化 ETF 策略，不连接真实券商账户，不自动下单，只做本地数据、虚拟交易、回测、审计、归因和前端展示。
 
-## 目标
+当前项目已经从最初的骨架推进到一个可运行的小型研究系统：可以拉取或读取 ETF 日线数据，筛选标的池，运行网格策略，和买入持有基准比较，生成审计与归因报告，并用训练 / 验证 / 测试切分检查策略是否可能泛化。
 
-- 使用 AkShare 获取 A 股 ETF 实时、历史和分钟级行情。
-- 按流动性、波动率、价格区间、趋势和成交额自动筛选 ETF。
-- 用虚拟本金创建本地模拟账户，执行规则化做T策略。
-- 记录每次触发原因、模拟成交、手续费、滑点、持仓、现金和收益。
-- 使用本地数据库保存行情缓存、模拟交易、信号、持仓和账户快照。
-- 提供本地网页看板，展示 ETF K 线、成交量、交易标记、收益曲线和回撤。
-- 输出每日/阶段性报告，验证策略是否稳定、是否过度交易、是否有回撤风险。
+## 当前状态
 
-## 当前技术路线
+已完成：
 
-第一版采用轻量本地架构：
+- AkShare / 本地 Parquet / 样例数据三种数据模式。
+- ETF 标的筛选，默认使用初始观察窗口，避免用未来数据选标的。
+- 网格做 T 策略，支持底仓、网格加仓、分层卖出、冷却期、最大网格层数、趋势过滤。
+- 虚拟账户、手续费、滑点、T+1 开盘成交、仓位风控。
+- SQLite 保存信号、交易、持仓、账户快照和标的池。
+- CSV / Markdown 报告，包括交易、审计、收益差距归因。
+- FastAPI 本地只读接口。
+- React + Vite 前端看板，展示账户总览、ETF K 线、交易标记、回放和基准曲线。
+- 买入持有基准，包括 70% 仓位和满仓基准。
+- 行情状态分段：上涨、震荡、下跌、样本不足。
+- 训练 / 验证 / 测试实验框架，用于策略版本和参数网格对比。
+- 基础测试覆盖核心回测、基准、归因和实验模块。
+
+最近一次完整实验显示：训练期选中的版本是 `no_trend_filter`。它在训练期和验证期仍跑输 70% 买入持有，但在测试期小幅跑赢。当前策略还不能证明有稳定超额收益，更像一个低回撤、低仓位、偏震荡的策略原型。
+
+## 技术栈
 
 ```text
-数据源：AkShare
+数据源：AkShare / 本地样例数据
 后端：Python + FastAPI
 行情存储：Parquet + DuckDB
 交易状态：SQLite
 前端：React + Vite
 K线图：TradingView Lightweight Charts
 统计图：ECharts
+测试：pytest
 ```
 
-MongoDB 暂不作为第一版默认数据库。它适合复杂 JSON 事件、策略日志和后续更大的实时数据流，但第一版的 ETF OHLCV 行情和交易表更适合用 SQLite、DuckDB 和 Parquet，部署更简单，也更方便回测和聚合查询。
-
-## 推荐借鉴项目
-
-| 项目 | 用途 | 借鉴点 |
-| --- | --- | --- |
-| AkShare | 数据源 | ETF 实时行情、历史行情、分钟数据 |
-| xalpha | 基金/ETF账户逻辑 | 网格、定投、基金账户、收益记录 |
-| qteasy | 本地量化框架 | 本地数据、回测、模拟交易、交易成本、T+1规则 |
-| RQAlpha | 回测架构 | 撮合、账户、风控、报告模块划分 |
-| backtesting.py / vectorbt | 快速验证 | 指标计算、参数扫描、绩效统计 |
-
-## 第一版范围
-
-第一版只做本地模拟：
-
-- 不登录证券账户。
-- 不保存账号、密码、验证码、身份证等敏感信息。
-- 不自动下真实订单。
-- 只输出模拟交易和操作提醒。
-- 本地看板只读展示，不提供真实交易入口。
+MongoDB 暂不作为默认数据库。当前阶段的 OHLCV 行情、交易表和账户快照更适合用 Parquet、DuckDB 和 SQLite，部署简单，也方便回测和聚合分析。
 
 ## 项目结构
 
 ```text
 ETF/
-  README.md
   config/
-    config.example.yaml
+    config.example.yaml      # 本地配置、策略参数、实验区间
   docs/
-    ARCHITECTURE.md
-    ROADMAP.md
-    RUNBOOK.md
-    STRATEGY_SPEC.md
-    TECH_STACK.md
+    RUNBOOK.md               # 运行手册
+    STRATEGY_SPEC.md         # 策略规则说明
+    ARCHITECTURE.md          # 架构说明
+    ROADMAP.md               # 路线图
+    TECH_STACK.md            # 技术选型
   src/
-    data/          # ETF行情与缓存
-    storage/       # SQLite/DuckDB/Parquet 读写
-    universe/      # ETF筛选
-    strategy/      # 做T规则
-    broker_sim/    # 虚拟账户与撮合
-    risk/          # 风控
-    reporting/     # 报告与图表
-    api/           # FastAPI 本地接口
-    app/           # 命令行入口
-  frontend/        # React + Vite 本地看板
-  data/            # 本地行情缓存，不提交敏感数据
-    cache/         # 原始缓存
-    parquet/       # OHLCV 行情
-    local.db       # SQLite 本地状态库，不提交
-  reports/         # 回测和模拟报告
+    data/                    # ETF 数据获取与样例数据
+    storage/                 # SQLite / DuckDB / Parquet 读写
+    universe/                # ETF 标的筛选
+    strategy/                # 做 T 策略规则
+    broker_sim/              # 虚拟账户、撮合、风控
+    analysis/                # 基准、行情状态、分析工具
+    reporting/               # CSV / Markdown 报告
+    experiment/              # 训练、验证、测试和参数实验
+    api/                     # FastAPI 本地接口
+    app/                     # 命令行入口
+  frontend/                  # React + Vite 本地看板
+  data/                      # 本地行情和 SQLite 状态库
+  reports/                   # 回测、审计、归因和实验输出
+  tests/                     # 自动化测试
 ```
 
 ## 核心流程
 
 ```text
-拉取ETF池
-  -> 清洗行情数据
-  -> 写入 Parquet / DuckDB 可查询缓存
-  -> 按规则筛选候选ETF
-  -> 初始化虚拟账户
-  -> 逐个行情tick/分钟bar运行策略
-  -> 生成虚拟订单
-  -> 模拟撮合成交
-  -> 更新现金、持仓、盈亏
-  -> 风控检查
-  -> 写入 SQLite 状态库和 CSV 报告
+获取或读取 ETF 日线
+  -> 写入 / 读取 Parquet
+  -> 初始观察窗口筛选 ETF
+  -> 从筛选日之后开始回测
+  -> 策略在 T 日生成信号
+  -> T+1 日开盘按滑点和手续费模拟成交
+  -> 风控检查现金、单标的仓位、总仓位、底仓保护
+  -> 更新现金、持仓、收益和回撤
+  -> 写入 SQLite 和 CSV 报告
   -> FastAPI 提供本地接口
-  -> 前端展示 K 线、交易标记和账户曲线
+  -> 前端展示净值、K 线、交易、回放和基准对比
 ```
 
-## 建议第一版默认参数
+## 常用命令
 
-```text
-初始本金：100000 CNY
-单只ETF最大仓位：20%
-总仓位上限：70%
-底仓比例：50%
-单次做T金额：5000-10000 CNY
-手续费：万分之0.5到万分之3，可配置
-滑点：0.01%到0.05%，可配置
-交易单位：100份
-最小成交金额：1000 CNY
+安装 Python 依赖：
+
+```powershell
+pip install -r requirements.txt
 ```
 
-## 输出结果
-
-- `reports/daily_summary.csv`：每日账户净值、现金、持仓、市值、收益、回撤。
-- `reports/trades.csv`：每笔模拟交易的时间、ETF、方向、数量、价格、原因。
-- `reports/positions.csv`：当前虚拟持仓。
-- `reports/signals.csv`：触发过但未成交/被风控拦截的信号。
-- `reports/audit_report.csv`：逐笔策略审计明细。
-- `reports/audit_report.md`：策略审计摘要。
-- `reports/report.html`：可视化报告，后续实现。
-- `data/parquet/*.parquet`：ETF 日线、分钟线和实时快照缓存。
-- `data/local.db`：模拟交易、信号、持仓、账户快照和筛选结果。
-
-## 下一步
-
-先实现一个最小闭环：
-
-1. 用 AkShare 拉取 ETF 实时行情和历史日线。
-2. 选出成交额靠前、波动率合适的 ETF。
-3. 用一个简单网格/均值回归做T规则跑历史模拟。
-4. 把行情写入 Parquet，把交易状态写入 SQLite。
-5. 输出交易日志和收益统计。
-6. 用 FastAPI + React 做一个本地 K 线看板。
-
-当前已支持两种数据模式：
+跑样例数据：
 
 ```powershell
 python -m src.app.run_backtest --sample --periods 120
+```
+
+跑本地已缓存 ETF 数据：
+
+```powershell
+python -m src.app.run_backtest --provider local
+```
+
+用 AkShare 拉取真实 ETF 日线并回测：
+
+```powershell
 python -m src.app.run_backtest --provider akshare
 ```
 
-## 运行方式
+对比策略参数和买入持有基准：
 
-详见 [RUNBOOK.md](docs/RUNBOOK.md)。
+```powershell
+python -m src.app.compare_strategy_params
+```
+
+生成收益差距归因报告：
+
+```powershell
+python -m src.app.analyze_attribution
+```
+
+运行训练 / 验证 / 测试实验：
+
+```powershell
+python -m src.app.run_experiment
+```
+
+运行测试：
+
+```powershell
+python -m pytest -q
+```
+
+启动后端：
+
+```powershell
+uvicorn src.api.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+启动前端：
+
+```powershell
+cd frontend
+npm.cmd run dev -- --host 127.0.0.1 --port 5173
+```
+
+访问：
+
+```text
+http://127.0.0.1:5173/
+```
+
+## 主要输出
+
+普通回测输出：
+
+```text
+reports/daily_summary.csv
+reports/signals.csv
+reports/trades.csv
+reports/positions.csv
+reports/universe.csv
+reports/audit_report.csv
+reports/audit_report.md
+```
+
+策略对比输出：
+
+```text
+reports/strategy_comparison.csv
+```
+
+归因分析输出：
+
+```text
+reports/attribution_report.md
+reports/attribution_summary.csv
+reports/attribution_by_regime.csv
+reports/attribution_by_symbol.csv
+reports/attribution_sell_opportunities.csv
+reports/attribution_rejected_buys.csv
+```
+
+实验框架输出：
+
+```text
+reports/experiment_comparison.csv
+reports/experiment_summary.csv
+```
+
+## 关键设计修正
+
+项目已经修复了几个会影响回测可信度的问题：
+
+- 标的池筛选不使用完整未来区间，只使用初始观察窗口。
+- 买入持有基准的入场时间和策略的 T+1 开盘成交口径对齐。
+- 风控检查使用含滑点的预计成交价。
+- 网格卖出按每一笔加仓批次成本触发，而不是整体平均成本。
+- 归因报告中的被拒买入机会使用去重保守估计，同时保留逐笔上限，避免误读。
+- 训练、验证、测试区间分离，减少同一段历史里调参又评价导致的过拟合。
+
+## 当前策略结论
+
+当前网格策略已经能在本地完整运行，但还不是一个可以认为“稳定优于买入持有”的策略。
+
+目前观察到的问题：
+
+- 策略平均仓位偏低，上涨阶段容易跑输买入持有。
+- 趋势过滤会拦截大量买入，降低下跌风险，也可能错过反弹。
+- 分层卖出更符合网格逻辑，但上涨行情中仍可能过早减仓。
+- ETF 样本数量还少，需要扩大 ETF 池和时间区间。
+- 参数网格还很小，需要继续扩展实验维度。
+
+下一步更适合做：
+
+- 扩大 ETF 池，覆盖更多宽基、行业、主题和商品 ETF。
+- 在 `src/experiment/` 里增加更多策略版本，例如趋势持仓增强、上涨少卖、动态仓位。
+- 把实验结果接入前端，做一个“实验对比”页面。
+- 增加滚动训练 / walk-forward 验证，而不是只切一次训练、验证、测试。
+
+## 说明
+
+本项目只用于策略研究和本地模拟，不构成投资建议，也不会连接真实券商账户或自动实盘交易。
+
+更详细的运行步骤见 [docs/RUNBOOK.md](docs/RUNBOOK.md)。
