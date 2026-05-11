@@ -307,3 +307,18 @@ def experiment_comparison() -> list[dict]:
 @app.get("/api/experiments/walk-forward")
 def experiment_walk_forward() -> list[dict]:
     return _report_csv("experiment_walk_forward.csv")
+
+
+@app.get("/api/experiments/metrics")
+def experiment_metrics() -> list[dict]:
+    return _report_csv("experiment_metrics.csv")
+
+
+@app.get("/api/experiments/variant-metrics")
+def experiment_variant_metrics() -> list[dict]:
+    return _report_csv("experiment_variant_metrics.csv")
+
+
+@app.get("/api/data-quality")
+def data_quality() -> list[dict]:
+    return _report_csv("data_quality.csv")

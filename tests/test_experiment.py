@@ -107,6 +107,9 @@ def test_strategy_variants_include_built_ins_and_parameter_grid() -> None:
     assert "current" in names
     assert "no_trend_filter" in names
     assert "grid_grid_pct_0.05" in names
+    assert "uptrend_slow_sell" in names
+    assert "trend_enhanced_base" in names
+    assert "adaptive_grid" in names
 
 
 def test_run_experiment_selects_train_variant_and_reports_all_splits() -> None:
@@ -115,7 +118,11 @@ def test_run_experiment_selects_train_variant_and_reports_all_splits() -> None:
 
     assert result["selected_variant"]
     assert result["walk_forward"]
+    assert result["metrics"]
+    assert result["variant_metrics"]
     assert {row["split"] for row in result["rows"]} == {"train", "validation"}
     assert {row["type"] for row in result["rows"]} >= {"strategy", "benchmark"}
     assert [row["split"] for row in result["summary"]] == ["train", "validation"]
     assert any(row["selected_from_train"] for row in result["rows"])
+    assert "win_rate" in result["metrics"][0]
+    assert any(row["variant"] == result["selected_variant"] for row in result["variant_metrics"])

@@ -36,6 +36,7 @@ def main() -> None:
     rows = pd.DataFrame(result["rows"])
     summary = pd.DataFrame(result["summary"])
     walk_forward = pd.DataFrame(result["walk_forward"])
+    metrics = pd.DataFrame(result["metrics"])
     selected = result["selected_variant"]
     print(f"selected_variant: {selected}")
     if not summary.empty:
@@ -45,6 +46,9 @@ def main() -> None:
     if not walk_forward.empty:
         print("walk_forward:")
         print(walk_forward.to_string(index=False))
+    if not metrics.empty:
+        print("metrics:")
+        print(metrics.to_string(index=False))
     for name, path in paths.items():
         print(f"{name}: {path}")
 

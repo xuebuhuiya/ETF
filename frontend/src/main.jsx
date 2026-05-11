@@ -645,17 +645,14 @@ function EtfDetailPage({
   );
 }
 
-function ExperimentPage({ summaryRows, comparisonRows, walkForwardRows }) {
+function ExperimentPage({ summaryRows, comparisonRows, walkForwardRows, metricsRows, variantMetricsRows }) {
   const selected = summaryRows[0]?.selected_variant ?? '-';
   const train = summaryRows.find((row) => row.split === 'train');
   const validation = summaryRows.find((row) => row.split === 'validation');
   const test = summaryRows.find((row) => row.split === 'test');
+  const metrics = metricsRows[0] ?? {};
   const strategyRows = comparisonRows.filter((row) => row.type === 'strategy' && row.split === 'train');
   const sortedStrategies = [...strategyRows].sort((a, b) => Number(b.score ?? 0) - Number(a.score ?? 0)).slice(0, 8);
-  const avgWalkForward =
-    walkForwardRows.length > 0
-      ? walkForwardRows.reduce((sum, row) => sum + Number(row.excess_return ?? 0), 0) / walkForwardRows.length
-      : null;
 
   return (
     <>
@@ -680,11 +677,31 @@ function ExperimentPage({ summaryRows, comparisonRows, walkForwardRows }) {
           </div>
           <div>
             <span>滚动验证轮数</span>
-            <strong>{walkForwardRows.length}</strong>
+            <strong>{metrics.window_count ?? walkForwardRows.length}</strong>
+          </div>
+          <div>
+            <span>滚动胜率</span>
+            <strong className={valueClass(Number(metrics.win_rate ?? 0) - 0.5)}>{formatPct(metrics.win_rate)}</strong>
           </div>
           <div>
             <span>滚动平均超额</span>
-            <strong className={valueClass(avgWalkForward)}>{formatPct(avgWalkForward)}</strong>
+            <strong className={valueClass(metrics.average_excess_return)}>{formatPct(metrics.average_excess_return)}</strong>
+          </div>
+          <div>
+            <span>最差窗口</span>
+            <strong>{metrics.worst_window ?? '-'}</strong>
+          </div>
+          <div>
+            <span>最好窗口</span>
+            <strong>{metrics.best_window ?? '-'}</strong>
+          </div>
+          <div>
+            <span>稳定跑赢基准</span>
+            <strong>{metrics.stable_vs_benchmark ? '是' : '否'}</strong>
+          </div>
+          <div>
+            <span>平均交易次数</span>
+            <strong>{formatNumber(metrics.average_trades, 1)}</strong>
           </div>
         </div>
       </section>
@@ -748,6 +765,38 @@ function ExperimentPage({ summaryRows, comparisonRows, walkForwardRows }) {
       </section>
 
       <section>
+        <h3>策略版本总览</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>策略版本</th>
+              <th>训练期收益</th>
+              <th>验证期收益</th>
+              <th>测试期收益</th>
+              <th>滚动胜率</th>
+              <th>平均超额</th>
+              <th>最大回撤</th>
+              <th>平均交易次数</th>
+            </tr>
+          </thead>
+          <tbody>
+            {variantMetricsRows.map((row) => (
+              <tr key={row.variant}>
+                <td>{row.variant}</td>
+                <td>{formatPct(row.train_return)}</td>
+                <td>{formatPct(row.validation_return)}</td>
+                <td>{formatPct(row.test_return)}</td>
+                <td>{formatPct(row.walk_forward_win_rate)}</td>
+                <td className={valueClass(row.walk_forward_average_excess)}>{formatPct(row.walk_forward_average_excess)}</td>
+                <td>{formatPct(row.max_drawdown)}</td>
+                <td>{formatNumber(row.average_trades, 1)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+
+      <section>
         <h3>Walk-forward 滚动验证</h3>
         <table>
           <thead>
@@ -790,6 +839,8 @@ function App() {
   const [experimentSummary, setExperimentSummary] = useState([]);
   const [experimentComparison, setExperimentComparison] = useState([]);
   const [walkForwardRows, setWalkForwardRows] = useState([]);
+  const [experimentMetrics, setExperimentMetrics] = useState([]);
+  const [variantMetrics, setVariantMetrics] = useState([]);
   const [bars, setBars] = useState([]);
   const [trades, setTrades] = useState([]);
   const [signals, setSignals] = useState([]);
@@ -807,7 +858,9 @@ function App() {
       fetchJson('/api/experiments/summary'),
       fetchJson('/api/experiments/comparison'),
       fetchJson('/api/experiments/walk-forward'),
-    ]).then(([universeRows, equityData, benchmarkData, regimeData, experimentSummaryData, experimentComparisonData, walkForwardData]) => {
+      fetchJson('/api/experiments/metrics'),
+      fetchJson('/api/experiments/variant-metrics'),
+    ]).then(([universeRows, equityData, benchmarkData, regimeData, experimentSummaryData, experimentComparisonData, walkForwardData, metricsData, variantMetricsData]) => {
       setUniverse(universeRows);
       setEquityRows(equityData);
       setBenchmarkRows(benchmarkData);
@@ -815,6 +868,8 @@ function App() {
       setExperimentSummary(experimentSummaryData);
       setExperimentComparison(experimentComparisonData);
       setWalkForwardRows(walkForwardData);
+      setExperimentMetrics(metricsData);
+      setVariantMetrics(variantMetricsData);
       setPlaybackIndex(Math.max(0, equityData.length - 1));
       setSymbol(universeRows[0]?.symbol ?? '');
     });
@@ -943,6 +998,8 @@ function App() {
             summaryRows={experimentSummary}
             comparisonRows={experimentComparison}
             walkForwardRows={walkForwardRows}
+            metricsRows={experimentMetrics}
+            variantMetricsRows={variantMetrics}
           />
         ) : (
           <EtfDetailPage

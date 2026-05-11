@@ -156,6 +156,7 @@ experiment:
 实验流程：
 
 - 训练期：跑内置策略版本和 `experiment.parameter_grid` 参数组合，按 `收益 - 回撤惩罚` 选出一个训练期最优版本。
+- 内置策略版本包括：当前策略、关闭趋势过滤、严格趋势过滤、提高仓位、放慢卖出、上涨趋势少卖、趋势增强底仓、波动率自适应网格。
 - 验证期：固定训练期选出的版本，不再重新调参，观察是否还能有效。
 - 测试期：作为最后留出区间，用来减少过拟合错觉。
 - 每个区间都会重新用初始观察窗口筛选 ETF，避免使用该区间后半段信息。
@@ -166,9 +167,11 @@ experiment:
 reports/experiment_comparison.csv
 reports/experiment_summary.csv
 reports/experiment_walk_forward.csv
+reports/experiment_metrics.csv
+reports/experiment_variant_metrics.csv
 ```
 
-其中 `experiment_summary.csv` 只展示训练期选中策略在各区间的表现，`experiment_comparison.csv` 展示所有策略版本和买入持有基准，`experiment_walk_forward.csv` 展示滚动训练 / 验证窗口的样本外结果。
+其中 `experiment_summary.csv` 只展示训练期选中策略在各区间的表现，`experiment_comparison.csv` 展示所有策略版本和买入持有基准，`experiment_walk_forward.csv` 展示滚动训练 / 验证窗口的样本外结果，`experiment_metrics.csv` 汇总 walk-forward 胜率、平均超额、最好/最差窗口和稳定性判断，`experiment_variant_metrics.csv` 按策略版本汇总训练/验证/测试收益和滚动验证表现。
 
 如果配置启用了 `experiment.walk_forward`，同一个命令还会执行 walk-forward：
 
@@ -191,6 +194,31 @@ experiment:
 GET http://127.0.0.1:8000/api/experiments/summary
 GET http://127.0.0.1:8000/api/experiments/comparison
 GET http://127.0.0.1:8000/api/experiments/walk-forward
+GET http://127.0.0.1:8000/api/experiments/metrics
+GET http://127.0.0.1:8000/api/experiments/variant-metrics
+```
+
+前端 `实验对比` 页面会展示固定切分表现、训练期策略排名、策略版本总览和 walk-forward 滚动验证结果。
+
+## 2.5 数据质量检查
+
+在已经有本地行情 Parquet 后，可以运行：
+
+```powershell
+python -m src.app.check_data_quality
+```
+
+输出文件：
+
+```text
+reports/data_quality.csv
+reports/data_quality.md
+```
+
+检查内容包括每只 ETF 的数据天数、起止日期、完整度、关键字段缺失、重复日期，以及是否有足够数据参与初始筛选。API：
+
+```text
+GET http://127.0.0.1:8000/api/data-quality
 ```
 
 同样的买入持有基准也会通过 API 提供给前端净值图：
@@ -205,7 +233,7 @@ GET http://127.0.0.1:8000/api/benchmarks/equity
 - `70%仓位买入持有`：使用 `risk.max_total_position_pct`，更适合和当前策略公平比较。
 - `满仓买入持有`：用于观察市场本身从起点到终点涨了多少。
 
-## 2.4 行情状态分段
+## 2.6 行情状态分段
 
 前端和 API 会按等权 ETF 组合判断市场状态：
 
@@ -226,7 +254,7 @@ GET http://127.0.0.1:8000/api/regimes/summary
 - 70% 买入持有基准在同一批日期里的复合收益。
 - 策略超额收益、回撤和成交次数。
 
-## 2.5 收益差距归因报告
+## 2.7 收益差距归因报告
 
 在已经完成一次回测后，可以运行：
 

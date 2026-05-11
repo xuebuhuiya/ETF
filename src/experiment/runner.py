@@ -26,10 +26,13 @@ def run_experiment(config: dict, initial_cash: float, bars: pd.DataFrame, splits
     for row in rows:
         row["selected_from_train"] = bool(selected_variant and row["variant"] == selected_variant)
 
+    walk_forward = run_walk_forward(config, initial_cash, bars, walk_forward_windows_from_config(config))
     return {
         "rows": rows,
         "summary": build_experiment_summary(rows, selected_variant),
-        "walk_forward": run_walk_forward(config, initial_cash, bars, walk_forward_windows_from_config(config)),
+        "walk_forward": walk_forward,
+        "metrics": build_experiment_metrics(walk_forward),
+        "variant_metrics": build_variant_metrics(rows, walk_forward),
         "selected_variant": selected_variant,
     }
 
@@ -187,6 +190,68 @@ def build_experiment_summary(rows: list[dict], selected_variant: str | None) -> 
     return summary
 
 
+def build_experiment_metrics(walk_forward_rows: list[dict]) -> list[dict]:
+    valid_rows = [row for row in walk_forward_rows if row.get("excess_return") is not None]
+    if not valid_rows:
+        return []
+    excess_values = [float(row["excess_return"]) for row in valid_rows]
+    trades = [float(row.get("trades") or 0) for row in valid_rows]
+    drawdowns = [abs(float(row.get("strategy_max_drawdown") or 0)) for row in valid_rows]
+    strategy_returns = [float(row.get("strategy_total_return") or 0) for row in valid_rows]
+    worst = min(valid_rows, key=lambda row: float(row["excess_return"]))
+    best = max(valid_rows, key=lambda row: float(row["excess_return"]))
+    avg_return = sum(strategy_returns) / len(strategy_returns)
+    avg_drawdown = sum(drawdowns) / len(drawdowns)
+    avg_excess = sum(excess_values) / len(excess_values)
+    winning_windows = sum(1 for value in excess_values if value > 0)
+    positive_total = sum(value for value in excess_values if value > 0)
+    total_abs = sum(abs(value) for value in excess_values)
+    concentration = positive_total / total_abs if total_abs else 0.0
+    return [
+        {
+            "window_count": len(valid_rows),
+            "winning_windows": winning_windows,
+            "win_rate": round(winning_windows / len(valid_rows), 6),
+            "average_excess_return": round(avg_excess, 6),
+            "worst_window": worst["window"],
+            "worst_window_excess_return": worst["excess_return"],
+            "best_window": best["window"],
+            "best_window_excess_return": best["excess_return"],
+            "return_drawdown_ratio": round(avg_return / avg_drawdown, 6) if avg_drawdown else None,
+            "average_trades": round(sum(trades) / len(trades), 2),
+            "positive_excess_concentration": round(concentration, 6),
+            "stable_vs_benchmark": winning_windows > len(valid_rows) / 2 and avg_excess > 0 and float(worst["excess_return"]) > -0.03,
+        }
+    ]
+
+
+def build_variant_metrics(rows: list[dict], walk_forward_rows: list[dict]) -> list[dict]:
+    variants = sorted({row["variant"] for row in rows if row.get("type") == "strategy"})
+    metrics = []
+    for variant in variants:
+        fixed_rows = [row for row in rows if row.get("type") == "strategy" and row.get("variant") == variant]
+        by_split = {row["split"]: row for row in fixed_rows}
+        wf_rows = [row for row in walk_forward_rows if row.get("selected_variant") == variant and row.get("excess_return") is not None]
+        wf_excess = [float(row["excess_return"]) for row in wf_rows]
+        win_rate = sum(1 for value in wf_excess if value > 0) / len(wf_excess) if wf_excess else None
+        all_drawdowns = [float(row.get("max_drawdown") or 0) for row in fixed_rows]
+        all_trades = [float(row.get("trades") or 0) for row in fixed_rows]
+        metrics.append(
+            {
+                "variant": variant,
+                "train_return": by_split.get("train", {}).get("total_return"),
+                "validation_return": by_split.get("validation", {}).get("total_return"),
+                "test_return": by_split.get("test", {}).get("total_return"),
+                "walk_forward_selected_windows": len(wf_rows),
+                "walk_forward_win_rate": round(win_rate, 6) if win_rate is not None else None,
+                "walk_forward_average_excess": round(sum(wf_excess) / len(wf_excess), 6) if wf_excess else None,
+                "max_drawdown": min(all_drawdowns) if all_drawdowns else None,
+                "average_trades": round(sum(all_trades) / len(all_trades), 2) if all_trades else None,
+            }
+        )
+    return metrics
+
+
 def write_experiment_reports(output_dir: str | Path, result: dict) -> dict[str, Path]:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -194,11 +259,17 @@ def write_experiment_reports(output_dir: str | Path, result: dict) -> dict[str, 
         "experiment_comparison_csv": output_path / "experiment_comparison.csv",
         "experiment_summary_csv": output_path / "experiment_summary.csv",
         "experiment_walk_forward_csv": output_path / "experiment_walk_forward.csv",
+        "experiment_metrics_csv": output_path / "experiment_metrics.csv",
+        "experiment_variant_metrics_csv": output_path / "experiment_variant_metrics.csv",
     }
     pd.DataFrame(result["rows"]).to_csv(paths["experiment_comparison_csv"], index=False, encoding="utf-8-sig")
     pd.DataFrame(result["summary"]).to_csv(paths["experiment_summary_csv"], index=False, encoding="utf-8-sig")
     pd.DataFrame(result.get("walk_forward", [])).to_csv(
         paths["experiment_walk_forward_csv"], index=False, encoding="utf-8-sig"
+    )
+    pd.DataFrame(result.get("metrics", [])).to_csv(paths["experiment_metrics_csv"], index=False, encoding="utf-8-sig")
+    pd.DataFrame(result.get("variant_metrics", [])).to_csv(
+        paths["experiment_variant_metrics_csv"], index=False, encoding="utf-8-sig"
     )
     return paths
 

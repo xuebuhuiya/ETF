@@ -190,6 +190,15 @@ reports/attribution_rejected_buys.csv
 reports/experiment_comparison.csv
 reports/experiment_summary.csv
 reports/experiment_walk_forward.csv
+reports/experiment_metrics.csv
+reports/experiment_variant_metrics.csv
+```
+
+数据质量输出：
+
+```text
+reports/data_quality.csv
+reports/data_quality.md
 ```
 
 ## 关键设计修正
@@ -202,6 +211,7 @@ reports/experiment_walk_forward.csv
 - 网格卖出按每一笔加仓批次成本触发，而不是整体平均成本。
 - 归因报告中的被拒买入机会使用去重保守估计，同时保留逐笔上限，避免误读。
 - 训练、验证、测试区间分离，减少同一段历史里调参又评价导致的过拟合。
+- 实验指标增加 walk-forward 胜率、平均超额、最好/最差窗口、收益/回撤比和策略版本总览。
 
 ## 当前策略结论
 
@@ -212,14 +222,14 @@ reports/experiment_walk_forward.csv
 - 策略平均仓位偏低，上涨阶段容易跑输买入持有。
 - 趋势过滤会拦截大量买入，降低下跌风险，也可能错过反弹。
 - 分层卖出更符合网格逻辑，但上涨行情中仍可能过早减仓。
-- 当前本地缓存仍可能只有旧的少量 ETF；需要重新运行 AkShare 拉取，才能让扩展 ETF 池真正进入实验。
+- 已经加入上涨趋势少卖、趋势增强底仓、波动率自适应网格等实验策略版本，但仍需要更多样本验证。
 - 参数网格还很小，需要继续扩展实验维度。
 
 下一步更适合做：
 
-- 在 `src/experiment/` 里增加更多策略版本，例如趋势持仓增强、上涨少卖、动态仓位。
-- 把实验结果接入前端，做一个“实验对比”页面。
-- 继续扩大参数网格和策略版本，并用 walk-forward 作为主要评估口径。
+- 继续扩大参数网格，特别是仓位、止盈倍率、波动率窗口和趋势判断参数。
+- 增加更强的趋势持仓增强或动态仓位策略。
+- 用 walk-forward 和数据质量报告作为每次策略迭代前后的固定检查。
 
 ## 说明
 

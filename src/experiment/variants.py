@@ -37,12 +37,40 @@ def _built_in_variants(base_config: dict) -> list[tuple[str, dict]]:
     slower_sell = deepcopy(base_config)
     slower_sell["strategy"]["take_profit_pct"] = float(base_config["strategy"]["take_profit_pct"]) * 1.5
 
+    uptrend_slow_sell = deepcopy(base_config)
+    uptrend_slow_sell["strategy"]["slow_sell_in_uptrend"] = {
+        "enabled": True,
+        "ma_short": 20,
+        "ma_long": 60,
+        "take_profit_multiplier": 2.0,
+    }
+
+    trend_enhanced_base = deepcopy(base_config)
+    trend_enhanced_base["strategy"]["trend_enhanced_base"] = {
+        "enabled": True,
+        "ma_short": 20,
+        "ma_long": 60,
+        "uptrend_base_position_pct": 0.85,
+    }
+
+    adaptive_grid = deepcopy(base_config)
+    adaptive_grid["strategy"]["adaptive_grid"] = {
+        "enabled": True,
+        "volatility_window": 20,
+        "base_volatility": 0.012,
+        "min_multiplier": 0.75,
+        "max_multiplier": 1.75,
+    }
+
     return [
         ("current", current),
         ("no_trend_filter", no_trend),
         ("strict_below_ma_long_filter", strict),
         ("higher_exposure", higher_exposure),
         ("slower_sell", slower_sell),
+        ("uptrend_slow_sell", uptrend_slow_sell),
+        ("trend_enhanced_base", trend_enhanced_base),
+        ("adaptive_grid", adaptive_grid),
     ]
 
 

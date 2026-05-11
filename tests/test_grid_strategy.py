@@ -12,19 +12,22 @@ def _config(
     max_grid_levels: int = 5,
     buy_cooldown_days: int = 0,
     trend_filter: dict | None = None,
+    extra_strategy: dict | None = None,
 ) -> dict:
+    strategy = {
+        "grid_pct": 0.05,
+        "take_profit_pct": 0.05,
+        "max_grid_levels": max_grid_levels,
+        "buy_cooldown_days": buy_cooldown_days,
+        "base_position_pct": 0.2,
+        "trade_amount": 10_000,
+        "allow_buy": True,
+        "allow_sell": True,
+        "trend_filter": trend_filter or {"enabled": False},
+    }
+    strategy.update(extra_strategy or {})
     return {
-        "strategy": {
-            "grid_pct": 0.05,
-            "take_profit_pct": 0.05,
-            "max_grid_levels": max_grid_levels,
-            "buy_cooldown_days": buy_cooldown_days,
-            "base_position_pct": 0.2,
-            "trade_amount": 10_000,
-            "allow_buy": True,
-            "allow_sell": True,
-            "trend_filter": trend_filter or {"enabled": False},
-        },
+        "strategy": strategy,
         "broker_sim": {
             "lot_size": 100,
             "fee_rate": 0,
@@ -176,3 +179,67 @@ def test_grid_sell_uses_grid_lot_entry_price_not_average_cost() -> None:
     assert len(sells) == 1
     assert sells[0]["signal_datetime"] == "2024-01-03"
     assert sells[0]["datetime"] == "2024-01-04"
+
+
+def test_uptrend_slow_sell_raises_effective_take_profit() -> None:
+    backtester = GridTBacktester(
+        _config(
+            extra_strategy={
+                "slow_sell_in_uptrend": {
+                    "enabled": True,
+                    "take_profit_multiplier": 2,
+                }
+            }
+        ),
+        initial_cash=100_000,
+    )
+
+    params = backtester._effective_grid_params({"trend_up": True})
+
+    assert params["take_profit_pct"] == 0.1
+    assert params["uptrend_sell_multiplier"] == 2
+
+
+def test_adaptive_grid_widens_grid_when_volatility_is_high() -> None:
+    backtester = GridTBacktester(
+        _config(
+            extra_strategy={
+                "adaptive_grid": {
+                    "enabled": True,
+                    "base_volatility": 0.01,
+                    "min_multiplier": 0.75,
+                    "max_multiplier": 2,
+                }
+            }
+        ),
+        initial_cash=100_000,
+    )
+
+    params = backtester._effective_grid_params({"trend_volatility": 0.02})
+
+    assert params["grid_pct"] == 0.1
+    assert params["take_profit_pct"] == 0.1
+    assert params["volatility_multiplier"] == 2
+
+
+def test_trend_enhanced_base_adds_base_when_uptrend() -> None:
+    account = GridTBacktester(
+        _config(
+            extra_strategy={
+                "trend_enhanced_base": {
+                    "enabled": True,
+                    "ma_short": 2,
+                    "ma_long": 3,
+                    "uptrend_base_position_pct": 0.6,
+                }
+            }
+        ),
+        initial_cash=100_000,
+    ).run(
+        run_id=1,
+        bars=_bars(closes=[10, 10, 11, 12, 13], opens=[10, 10, 11, 12, 13]),
+        universe=_universe(),
+    )
+
+    assert any(signal["reason"] == "increase_base_position" for signal in account.signals)
+    assert any("increase_base_position" in trade["reason"] for trade in account.trades)
