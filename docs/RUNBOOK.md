@@ -167,11 +167,12 @@ experiment:
 reports/experiment_comparison.csv
 reports/experiment_summary.csv
 reports/experiment_walk_forward.csv
+reports/experiment_variant_walk_forward.csv
 reports/experiment_metrics.csv
 reports/experiment_variant_metrics.csv
 ```
 
-其中 `experiment_summary.csv` 只展示训练期选中策略在各区间的表现，`experiment_comparison.csv` 展示所有策略版本和买入持有基准，`experiment_walk_forward.csv` 展示滚动训练 / 验证窗口的样本外结果，`experiment_metrics.csv` 汇总 walk-forward 胜率、平均超额、最好/最差窗口和稳定性判断，`experiment_variant_metrics.csv` 按策略版本汇总训练/验证/测试收益和滚动验证表现。
+其中 `experiment_summary.csv` 只展示训练期选中策略在各区间的表现，`experiment_comparison.csv` 展示所有策略版本和买入持有基准，`experiment_walk_forward.csv` 保留每轮训练期选中策略后的验证结果，`experiment_variant_walk_forward.csv` 展示每个策略版本跨所有验证窗口的完整表现，`experiment_metrics.csv` 汇总选中策略的 walk-forward 胜率、平均超额、最好/最差窗口和稳定性判断，`experiment_variant_metrics.csv` 按策略版本汇总训练/验证/测试收益和完整滚动验证指标。
 
 如果配置启用了 `experiment.walk_forward`，同一个命令还会执行 walk-forward：
 
@@ -194,6 +195,7 @@ experiment:
 GET http://127.0.0.1:8000/api/experiments/summary
 GET http://127.0.0.1:8000/api/experiments/comparison
 GET http://127.0.0.1:8000/api/experiments/walk-forward
+GET http://127.0.0.1:8000/api/experiments/variant-walk-forward
 GET http://127.0.0.1:8000/api/experiments/metrics
 GET http://127.0.0.1:8000/api/experiments/variant-metrics
 ```
@@ -215,7 +217,7 @@ reports/data_quality.csv
 reports/data_quality.md
 ```
 
-检查内容包括每只 ETF 的数据天数、起止日期、完整度、关键字段缺失、重复日期，以及是否有足够数据参与初始筛选。API：
+检查内容包括每只 ETF 的实际交易日、全市场预期交易日、起止日期、完整度、关键字段缺失、重复日期，以及是否有足够数据参与初始筛选。完整度使用当前缓存中全市场实际出现过的交易日集合计算，不用普通工作日历估算，因此 A 股节假日不会被当成缺口。API：
 
 ```text
 GET http://127.0.0.1:8000/api/data-quality

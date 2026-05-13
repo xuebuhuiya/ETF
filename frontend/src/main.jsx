@@ -773,8 +773,11 @@ function ExperimentPage({ summaryRows, comparisonRows, walkForwardRows, metricsR
               <th>训练期收益</th>
               <th>验证期收益</th>
               <th>测试期收益</th>
+              <th>滚动窗口</th>
               <th>滚动胜率</th>
               <th>平均超额</th>
+              <th>最差窗口</th>
+              <th>最好窗口</th>
               <th>最大回撤</th>
               <th>平均交易次数</th>
             </tr>
@@ -786,10 +789,13 @@ function ExperimentPage({ summaryRows, comparisonRows, walkForwardRows, metricsR
                 <td>{formatPct(row.train_return)}</td>
                 <td>{formatPct(row.validation_return)}</td>
                 <td>{formatPct(row.test_return)}</td>
+                <td>{formatNumber(row.walk_forward_window_count, 0)}</td>
                 <td>{formatPct(row.walk_forward_win_rate)}</td>
                 <td className={valueClass(row.walk_forward_average_excess)}>{formatPct(row.walk_forward_average_excess)}</td>
+                <td className={valueClass(row.walk_forward_worst_excess)}>{formatPct(row.walk_forward_worst_excess)}</td>
+                <td className={valueClass(row.walk_forward_best_excess)}>{formatPct(row.walk_forward_best_excess)}</td>
                 <td>{formatPct(row.max_drawdown)}</td>
-                <td>{formatNumber(row.average_trades, 1)}</td>
+                <td>{formatNumber(row.walk_forward_average_trades ?? row.average_trades, 1)}</td>
               </tr>
             ))}
           </tbody>

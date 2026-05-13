@@ -118,6 +118,7 @@ def test_run_experiment_selects_train_variant_and_reports_all_splits() -> None:
 
     assert result["selected_variant"]
     assert result["walk_forward"]
+    assert result["variant_walk_forward"]
     assert result["metrics"]
     assert result["variant_metrics"]
     assert {row["split"] for row in result["rows"]} == {"train", "validation"}
@@ -125,4 +126,7 @@ def test_run_experiment_selects_train_variant_and_reports_all_splits() -> None:
     assert [row["split"] for row in result["summary"]] == ["train", "validation"]
     assert any(row["selected_from_train"] for row in result["rows"])
     assert "win_rate" in result["metrics"][0]
-    assert any(row["variant"] == result["selected_variant"] for row in result["variant_metrics"])
+    variant_metrics = {row["variant"]: row for row in result["variant_metrics"]}
+    assert result["selected_variant"] in variant_metrics
+    assert all(row["walk_forward_window_count"] > 0 for row in variant_metrics.values())
+    assert all(row["walk_forward_average_trades"] is not None for row in variant_metrics.values())

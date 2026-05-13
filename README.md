@@ -190,6 +190,7 @@ reports/attribution_rejected_buys.csv
 reports/experiment_comparison.csv
 reports/experiment_summary.csv
 reports/experiment_walk_forward.csv
+reports/experiment_variant_walk_forward.csv
 reports/experiment_metrics.csv
 reports/experiment_variant_metrics.csv
 ```
@@ -209,9 +210,11 @@ reports/data_quality.md
 - 买入持有基准的入场时间和策略的 T+1 开盘成交口径对齐。
 - 风控检查使用含滑点的预计成交价。
 - 网格卖出按每一笔加仓批次成本触发，而不是整体平均成本。
+- 动态网格卖出成交后，按信号生成时的实际止盈阈值消耗加仓批次。
 - 归因报告中的被拒买入机会使用去重保守估计，同时保留逐笔上限，避免误读。
 - 训练、验证、测试区间分离，减少同一段历史里调参又评价导致的过拟合。
-- 实验指标增加 walk-forward 胜率、平均超额、最好/最差窗口、收益/回撤比和策略版本总览。
+- 实验指标增加 walk-forward 胜率、平均超额、最好/最差窗口、收益/回撤比和策略版本总览；策略版本指标会跨所有验证窗口评价，不只统计被训练期选中的窗口。
+- 数据质量完整度基于缓存里的全市场实际交易日集合计算，避免把 A 股节假日误判为缺口。
 
 ## 当前策略结论
 

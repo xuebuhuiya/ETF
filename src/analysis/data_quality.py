@@ -20,32 +20,42 @@ def build_data_quality_rows(
 
     frame = bars.copy()
     frame["datetime"] = pd.to_datetime(frame["datetime"])
+    frame["trading_date"] = frame["datetime"].dt.normalize()
+    market_trading_dates = sorted(frame["trading_date"].dropna().unique())
+    expected_trading_days = max(1, len(market_trading_dates))
+    global_start_date = pd.Timestamp(market_trading_dates[0]).strftime("%Y-%m-%d")
+    global_end_date = pd.Timestamp(market_trading_dates[-1]).strftime("%Y-%m-%d")
     rows = []
     for (symbol, name), group in frame.groupby(["symbol", "name"], sort=False):
         group = group.sort_values("datetime")
-        duplicate_dates = int(group["datetime"].duplicated().sum())
+        duplicate_dates = int(group["trading_date"].duplicated().sum())
         missing_by_column = {column: int(group[column].isna().sum()) for column in REQUIRED_COLUMNS if column in group}
         missing_total = sum(missing_by_column.values())
         row_count = int(len(group))
         start_date = group["datetime"].min()
         end_date = group["datetime"].max()
-        expected_days = max(1, len(pd.bdate_range(start_date, end_date)))
-        completeness = row_count / expected_days
+        actual_trading_days = int(group["trading_date"].nunique())
+        completeness = actual_trading_days / expected_trading_days
         rows.append(
             {
                 "symbol": symbol,
                 "name": name,
                 "row_count": row_count,
+                "actual_trading_days": actual_trading_days,
                 "start_date": start_date.strftime("%Y-%m-%d"),
                 "end_date": end_date.strftime("%Y-%m-%d"),
-                "expected_business_days": expected_days,
+                "global_start_date": global_start_date,
+                "global_end_date": global_end_date,
+                "expected_trading_days": expected_trading_days,
                 "data_completeness": round(completeness, 6),
                 "missing_required_values": missing_total,
                 "missing_detail": ";".join(
                     f"{column}:{count}" for column, count in missing_by_column.items() if count > 0
                 ),
                 "duplicate_dates": duplicate_dates,
-                "enough_for_universe": row_count >= selection_lookback_days and missing_total == 0 and duplicate_dates == 0,
+                "enough_for_universe": actual_trading_days >= selection_lookback_days
+                and missing_total == 0
+                and duplicate_dates == 0,
             }
         )
     return sorted(rows, key=lambda row: row["symbol"])
@@ -99,12 +109,12 @@ def _render_markdown(rows: list[dict]) -> str:
         "",
         "## 明细",
         "",
-        "| ETF | 名称 | 天数 | 起始 | 结束 | 完整度 | 缺失值 | 重复日期 | 可参与筛选 |",
-        "| --- | --- | ---: | --- | --- | ---: | ---: | ---: | --- |",
+        "| ETF | 名称 | 实际交易日 | 预期交易日 | 起始 | 结束 | 全局起始 | 全局结束 | 完整度 | 缺失值 | 重复日期 | 可参与筛选 |",
+        "| --- | --- | ---: | ---: | --- | --- | --- | --- | ---: | ---: | ---: | --- |",
     ]
     for row in rows:
         lines.append(
-            "| {symbol} | {name} | {row_count} | {start_date} | {end_date} | {data_completeness:.2%} | {missing_required_values} | {duplicate_dates} | {eligible} |".format(
+            "| {symbol} | {name} | {actual_trading_days} | {expected_trading_days} | {start_date} | {end_date} | {global_start_date} | {global_end_date} | {data_completeness:.2%} | {missing_required_values} | {duplicate_dates} | {eligible} |".format(
                 **row,
                 eligible="是" if row["enough_for_universe"] else "否",
             )

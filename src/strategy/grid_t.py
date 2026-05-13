@@ -60,7 +60,13 @@ class GridTBacktester:
             self._add_grid_lot(symbol, int(trade.get("quantity", pending["quantity"])), float(trade.get("price", open_price)))
             self.last_buy_day_index[symbol] = self.current_day_index
         elif pending["side"] == "sell":
-            self._consume_grid_lots(symbol, int(pending["quantity"]), float(pending["signal_price"]))
+            take_profit_pct = self._pending_take_profit_pct(pending)
+            self._consume_grid_lots(
+                symbol,
+                int(pending["quantity"]),
+                float(pending["signal_price"]),
+                take_profit_pct=take_profit_pct,
+            )
 
     def _maybe_initialize_base(
         self,
@@ -279,6 +285,7 @@ class GridTBacktester:
                     "signal_type": "grid_sell",
                     "avg_cost": round(position.avg_cost, 4),
                     "take_profit_pct": take_profit_pct,
+                    "effective_take_profit_pct": take_profit_pct,
                     "base_take_profit_pct": float(self.strategy_config["take_profit_pct"]),
                     "sell_threshold": round(sell_threshold, 4),
                     "sell_threshold_basis": "grid_lot_entry_price",
@@ -315,6 +322,14 @@ class GridTBacktester:
             return
         self.account.execute_signal(**kwargs)
 
+    def _pending_take_profit_pct(self, pending: dict) -> float:
+        audit = pending.get("audit") or {}
+        if "effective_take_profit_pct" in audit:
+            return float(audit["effective_take_profit_pct"])
+        if "take_profit_pct" in audit:
+            return float(audit["take_profit_pct"])
+        return float(self.strategy_config["take_profit_pct"])
+
     def _days_since_last_buy(self, symbol: str) -> int | None:
         last_day = self.last_buy_day_index.get(symbol)
         if last_day is None:
@@ -344,8 +359,18 @@ class GridTBacktester:
         threshold = min(float(lot["entry_price"]) * (1 + take_profit_pct) for lot in eligible)
         return sum(int(lot["quantity"]) for lot in eligible), threshold
 
-    def _consume_grid_lots(self, symbol: str, quantity: int, signal_price: float) -> None:
-        take_profit_pct = float(self.strategy_config["take_profit_pct"])
+    def _consume_grid_lots(
+        self,
+        symbol: str,
+        quantity: int,
+        signal_price: float,
+        *,
+        take_profit_pct: float | None = None,
+    ) -> None:
+        if take_profit_pct is None:
+            take_profit_pct = float(self.strategy_config["take_profit_pct"])
+        else:
+            take_profit_pct = float(take_profit_pct)
         remaining = quantity
         updated_lots: list[dict] = []
         for lot in self.grid_lots.get(symbol, []):

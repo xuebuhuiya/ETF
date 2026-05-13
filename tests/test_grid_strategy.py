@@ -200,6 +200,17 @@ def test_uptrend_slow_sell_raises_effective_take_profit() -> None:
     assert params["uptrend_sell_multiplier"] == 2
 
 
+def test_uptrend_slow_sell_consumes_lots_with_effective_take_profit() -> None:
+    backtester = GridTBacktester(_config(), initial_cash=100_000)
+    backtester.grid_lots["510300"] = [{"quantity": 100, "entry_price": 10.0}]
+    backtester.grid_levels["510300"] = 1
+
+    backtester._consume_grid_lots("510300", 100, 10.6, take_profit_pct=0.1)
+
+    assert backtester.grid_lots["510300"] == [{"quantity": 100, "entry_price": 10.0}]
+    assert backtester.grid_levels["510300"] == 1
+
+
 def test_adaptive_grid_widens_grid_when_volatility_is_high() -> None:
     backtester = GridTBacktester(
         _config(
@@ -220,6 +231,36 @@ def test_adaptive_grid_widens_grid_when_volatility_is_high() -> None:
     assert params["grid_pct"] == 0.1
     assert params["take_profit_pct"] == 0.1
     assert params["volatility_multiplier"] == 2
+
+
+def test_adaptive_grid_lot_consumption_matches_signal_take_profit() -> None:
+    backtester = GridTBacktester(_config(), initial_cash=100_000)
+    backtester.grid_lots["510300"] = [{"quantity": 100, "entry_price": 10.0}]
+    backtester.grid_levels["510300"] = 1
+
+    pending = {
+        "audit": {"effective_take_profit_pct": 0.08},
+        "quantity": 100,
+        "signal_price": 10.7,
+    }
+    backtester._consume_grid_lots(
+        "510300",
+        int(pending["quantity"]),
+        float(pending["signal_price"]),
+        take_profit_pct=backtester._pending_take_profit_pct(pending),
+    )
+
+    assert backtester.grid_lots["510300"] == [{"quantity": 100, "entry_price": 10.0}]
+
+    pending["signal_price"] = 10.8
+    backtester._consume_grid_lots(
+        "510300",
+        int(pending["quantity"]),
+        float(pending["signal_price"]),
+        take_profit_pct=backtester._pending_take_profit_pct(pending),
+    )
+
+    assert backtester.grid_lots["510300"] == []
 
 
 def test_trend_enhanced_base_adds_base_when_uptrend() -> None:
